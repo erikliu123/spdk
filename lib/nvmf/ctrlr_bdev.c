@@ -48,6 +48,7 @@
 #include "spdk/util.h"
 
 #include "spdk/log.h"
+#include "ndp.h"
 
 static bool
 nvmf_subsystem_bdev_io_type_supported(struct spdk_nvmf_subsystem *subsystem,
@@ -85,6 +86,48 @@ bool
 nvmf_ctrlr_write_zeroes_supported(struct spdk_nvmf_ctrlr *ctrlr)
 {
 	return nvmf_subsystem_bdev_io_type_supported(ctrlr->subsys, SPDK_BDEV_IO_TYPE_WRITE_ZEROES);
+}
+
+static void
+nvmf_ndp_complete_cmd(struct spdk_bdev_io *bdev_io, bool success,
+			     void *cb_arg)
+{
+	struct ndp_request *ndp_req = cb_arg;
+	struct spdk_nvmf_request	*req = ndp_req->nvmf_req;
+	struct spdk_nvme_cpl		*response = &req->rsp->nvme_cpl;
+	int				first_sc = 0, first_sct = 0, sc = 0, sct = 0;
+	uint32_t			cdw0 = 0;
+	struct spdk_nvmf_request	*first_req = req->first_fused_req;
+
+	if (spdk_unlikely(first_req != NULL)) {
+		/* fused commands - get status for both operations */
+		struct spdk_nvme_cpl *first_response = &first_req->rsp->nvme_cpl;
+
+		spdk_bdev_io_get_nvme_fused_status(bdev_io, &cdw0, &first_sct, &first_sc, &sct, &sc);
+		first_response->cdw0 = cdw0;
+		first_response->status.sc = first_sc;
+		first_response->status.sct = first_sct;
+		SPDK_NOTICELOG("unlikely thing happens\n");
+		/* first request should be completed */
+		spdk_nvmf_request_complete(first_req);
+		req->first_fused_req = NULL;
+	} else {
+		spdk_bdev_io_get_nvme_status(bdev_io, &cdw0, &sct, &sc);
+	}
+	SPDK_NOTICELOG("sct=%d, sc=%d\n", sct, sc);
+	response->cdw0 = cdw0;
+	response->status.sc = sc;
+	response->status.sct = sct;
+	//统计读取的数据是否完成，完成才完成请求
+	//SPDK_NOTICELOG("complete num_blocks[%d]\n", bdev_io->u.bdev.num_blocks);
+	spdk_bdev_free_io(bdev_io);
+	ndp_req->read_bdev_blocks += 8;
+	if(ndp_req->read_bdev_blocks == 16)
+	{
+		spdk_nvmf_request_complete(req);
+		free(ndp_req);
+	}
+
 }
 
 static void
@@ -190,9 +233,6 @@ nvmf_bdev_ctrlr_identify_ns(struct spdk_nvmf_ns *ns, struct spdk_nvme_ns_data *n
 	nsdata->nsfeat.ns_atomic_write_unit = 1;
 	nsdata->npwg = (phys_blocklen >> nsdata->lbaf[0].lbads) - 1;
 	nsdata->nawupf = nsdata->npwg;
-	nsdata->npwa = nsdata->npwg;
-	nsdata->npdg = nsdata->npwg;
-	nsdata->npda = nsdata->npwg;
 
 	nsdata->noiob = spdk_bdev_get_optimal_io_boundary(bdev);
 	nsdata->nmic.can_share = 1;
@@ -277,6 +317,85 @@ nvmf_bdev_zcopy_enabled(struct spdk_bdev *bdev)
 }
 
 int
+nvmf_ndp_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
+			 struct spdk_io_channel *ch, struct spdk_nvmf_request *req)
+{
+	uint64_t bdev_num_blocks = spdk_bdev_get_num_blocks(bdev);
+	uint32_t block_size = spdk_bdev_get_block_size(bdev);
+	struct spdk_nvme_cmd *cmd = &req->cmd->nvme_cmd;
+	struct spdk_nvme_cpl *rsp = &req->rsp->nvme_cpl;
+	uint64_t start_lba;
+	uint64_t num_blocks;
+	struct ndp_request *ndp_req = malloc(sizeof(ndp_req));
+	int rc;
+	ndp_req->nvmf_req = req;
+	ndp_req->total_bdev_blocks = 2 * 8;
+	ndp_req->read_bdev_blocks=0;
+
+	nvmf_bdev_ctrlr_get_rw_params(cmd, &start_lba, &num_blocks);
+
+	if (spdk_unlikely(!nvmf_bdev_ctrlr_lba_in_range(bdev_num_blocks, start_lba, num_blocks))) {
+		SPDK_ERRLOG("end of media\n");
+		rsp->status.sct = SPDK_NVME_SCT_GENERIC;
+		rsp->status.sc = SPDK_NVME_SC_LBA_OUT_OF_RANGE;
+		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
+	}
+
+	if (spdk_unlikely(num_blocks * block_size > req->length)) {
+		SPDK_ERRLOG("Read NLB %" PRIu64 " * block size %" PRIu32 " > SGL length %" PRIu32 "\n",
+			    num_blocks, block_size, req->length);
+		rsp->status.sct = SPDK_NVME_SCT_GENERIC;
+		rsp->status.sc = SPDK_NVME_SC_DATA_SGL_LENGTH_INVALID;
+		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
+	}
+
+	if (req->zcopy_phase == NVMF_ZCOPY_PHASE_EXECUTE) {
+		/* Return here after checking the lba etc */
+		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
+	}
+
+	assert(!spdk_nvmf_using_zcopy(req->zcopy_phase));
+	start_lba = 0;
+	//甚至可以不用iov
+	num_blocks = 8;
+	SPDK_NOTICELOG("io vector number [%d]\n", req->iovcnt);
+	int iocnt_tmp = req->iovcnt/2 > 0 ? req->iovcnt/2 : 1;
+	int read_len = num_blocks * block_size;
+	if(req->iovcnt == 1)
+	{
+		req->iov[1].iov_len = read_len;
+		req->iov[1].iov_base = req->iov[0].iov_base + read_len;
+	}
+	rc = spdk_bdev_readv_blocks(desc, ch, req->iov, iocnt_tmp, start_lba, num_blocks,
+				    nvmf_ndp_complete_cmd, ndp_req);
+	if (spdk_unlikely(rc)) {
+		if (rc == -ENOMEM) {
+			nvmf_bdev_ctrl_queue_io(req, bdev, ch, nvmf_ctrlr_process_io_cmd_resubmit, req);
+			return SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
+		}
+		rsp->status.sct = SPDK_NVME_SCT_GENERIC;
+		rsp->status.sc = SPDK_NVME_SC_INTERNAL_DEVICE_ERROR;
+		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
+	}
+
+	start_lba = 16;
+	num_blocks = 8;
+	rc = spdk_bdev_readv_blocks(desc, ch, req->iov+iocnt_tmp, iocnt_tmp, start_lba, num_blocks,
+				    nvmf_ndp_complete_cmd, ndp_req);
+	if (spdk_unlikely(rc)) {
+		if (rc == -ENOMEM) {
+			nvmf_bdev_ctrl_queue_io(req, bdev, ch, nvmf_ctrlr_process_io_cmd_resubmit, req);
+			return SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
+		}
+		rsp->status.sct = SPDK_NVME_SCT_GENERIC;
+		rsp->status.sc = SPDK_NVME_SC_INTERNAL_DEVICE_ERROR;
+		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
+	}
+
+	return SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
+}
+
+int
 nvmf_bdev_ctrlr_read_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 			 struct spdk_io_channel *ch, struct spdk_nvmf_request *req)
 {
@@ -289,13 +408,20 @@ nvmf_bdev_ctrlr_read_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 	int rc;
 
 	nvmf_bdev_ctrlr_get_rw_params(cmd, &start_lba, &num_blocks);
-
 	if (spdk_unlikely(!nvmf_bdev_ctrlr_lba_in_range(bdev_num_blocks, start_lba, num_blocks))) {
 		SPDK_ERRLOG("end of media\n");
 		rsp->status.sct = SPDK_NVME_SCT_GENERIC;
 		rsp->status.sc = SPDK_NVME_SC_LBA_OUT_OF_RANGE;
 		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
 	}
+	SPDK_NOTICELOG("Read NLB[%ld], block size[%u], SGL length[%u] \n",  
+		num_blocks, block_size, req->length);
+	SPDK_NOTICELOG("io vector number [%d], io vec info:\n", req->iovcnt);
+	for(int i=0; i<(int)req->iovcnt; i++)
+	{
+		printf("[%ld] ", req->iov[i].iov_len);
+	}
+	SPDK_NOTICELOG("\n");
 
 	if (spdk_unlikely(num_blocks * block_size > req->length)) {
 		SPDK_ERRLOG("Read NLB %" PRIu64 " * block size %" PRIu32 " > SGL length %" PRIu32 "\n",

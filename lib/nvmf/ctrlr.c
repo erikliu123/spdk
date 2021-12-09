@@ -930,22 +930,14 @@ nvmf_ctrlr_association_remove(void *ctx)
 	return SPDK_POLLER_BUSY;
 }
 
-static int
-_nvmf_ctrlr_cc_reset_shn_done(void *ctx)
+static void
+nvmf_ctrlr_cc_reset_shn_done(struct spdk_io_channel_iter *i, int status)
 {
-	struct spdk_nvmf_ctrlr *ctrlr = ctx;
-	uint32_t count;
+	struct spdk_nvmf_ctrlr *ctrlr = spdk_io_channel_iter_get_ctx(i);
 
-	if (ctrlr->cc_timer) {
-		spdk_poller_unregister(&ctrlr->cc_timer);
-	}
-
-	count = spdk_bit_array_count_set(ctrlr->qpair_mask);
-	SPDK_DEBUGLOG(nvmf, "ctrlr %p active queue count %u\n", ctrlr, count);
-
-	if (count > 1) {
-		ctrlr->cc_timer = SPDK_POLLER_REGISTER(_nvmf_ctrlr_cc_reset_shn_done, ctrlr, 100 * 1000);
-		return SPDK_POLLER_IDLE;
+	if (status < 0) {
+		SPDK_ERRLOG("Fail to disconnect io ctrlr qpairs\n");
+		assert(false);
 	}
 
 	if (ctrlr->disconnect_is_shn) {
@@ -968,20 +960,6 @@ _nvmf_ctrlr_cc_reset_shn_done(void *ctx)
 					   ctrlr->association_timeout * 1000);
 	}
 	ctrlr->disconnect_in_progress = false;
-	return SPDK_POLLER_BUSY;
-}
-
-static void
-nvmf_ctrlr_cc_reset_shn_done(struct spdk_io_channel_iter *i, int status)
-{
-	struct spdk_nvmf_ctrlr *ctrlr = spdk_io_channel_iter_get_ctx(i);
-
-	if (status < 0) {
-		SPDK_ERRLOG("Fail to disconnect io ctrlr qpairs\n");
-		assert(false);
-	}
-
-	_nvmf_ctrlr_cc_reset_shn_done((void *)ctrlr);
 }
 
 const struct spdk_nvmf_registers *
@@ -1259,7 +1237,7 @@ nvmf_property_get(struct spdk_nvmf_request *req)
 		size = 8;
 		break;
 	default:
-		SPDK_DEBUGLOG(nvmf, "Invalid size value %d\n", cmd->attrib.size);
+		SPDK_ERRLOG("Invalid size value %d\n", cmd->attrib.size);
 		response->status.sct = SPDK_NVME_SCT_COMMAND_SPECIFIC;
 		response->status.sc = SPDK_NVMF_FABRIC_SC_INVALID_PARAM;
 		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
@@ -1317,7 +1295,7 @@ nvmf_property_set(struct spdk_nvmf_request *req)
 		size = 8;
 		break;
 	default:
-		SPDK_DEBUGLOG(nvmf, "Invalid size value %d\n", cmd->attrib.size);
+		SPDK_ERRLOG("Invalid size value %d\n", cmd->attrib.size);
 		response->status.sct = SPDK_NVME_SCT_COMMAND_SPECIFIC;
 		response->status.sc = SPDK_NVMF_FABRIC_SC_INVALID_PARAM;
 		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
@@ -2299,7 +2277,7 @@ nvmf_ctrlr_get_log_page(struct spdk_nvmf_request *req)
 	uint8_t lid;
 
 	if (req->data == NULL) {
-		SPDK_DEBUGLOG(nvmf, "get log command with no buffer\n");
+		SPDK_ERRLOG("get log command with no buffer\n");
 		response->status.sct = SPDK_NVME_SCT_GENERIC;
 		response->status.sc = SPDK_NVME_SC_INVALID_FIELD;
 		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
@@ -2348,14 +2326,6 @@ nvmf_ctrlr_get_log_page(struct spdk_nvmf_request *req)
 			goto invalid_log_page;
 		}
 	} else {
-		if (offset > len) {
-			SPDK_ERRLOG("Get log page: offset (%" PRIu64 ") > len (%" PRIu64 ")\n",
-				    offset, len);
-			response->status.sct = SPDK_NVME_SCT_GENERIC;
-			response->status.sc = SPDK_NVME_SC_INVALID_FIELD;
-			return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
-		}
-
 		switch (lid) {
 		case SPDK_NVME_LOG_ERROR:
 			nvmf_get_error_log_page(ctrlr, req->iov, req->iovcnt, offset, len, rae);
@@ -2432,11 +2402,6 @@ spdk_nvmf_ctrlr_identify_ns(struct spdk_nvmf_ctrlr *ctrlr,
 			 (1U << nsdata->lbaf[nsdata->flbas.format].lbads);
 	if (nsdata->noiob > max_num_blocks) {
 		nsdata->noiob = max_num_blocks;
-	}
-
-	/* Set NOWS equal to Controller MDTS */
-	if (nsdata->nsfeat.optperf) {
-		nsdata->nows = max_num_blocks - 1;
 	}
 
 	if (subsystem->flags.ana_reporting) {
@@ -2698,7 +2663,7 @@ nvmf_ctrlr_identify(struct spdk_nvmf_request *req)
 	struct spdk_nvmf_subsystem *subsystem = ctrlr->subsys;
 
 	if (req->data == NULL || req->length < 4096) {
-		SPDK_DEBUGLOG(nvmf, "identify command with invalid buffer\n");
+		SPDK_ERRLOG("identify command with invalid buffer\n");
 		rsp->status.sct = SPDK_NVME_SCT_GENERIC;
 		rsp->status.sc = SPDK_NVME_SC_INVALID_FIELD;
 		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
@@ -3828,10 +3793,6 @@ nvmf_ctrlr_process_io_cmd(struct spdk_nvmf_request *req)
 		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
 	}
 
-	SPDK_DTRACE_PROBE3(nvmf_request_io_exec_path, req,
-			   req->qpair->ctrlr->listener->trid->traddr,
-			   req->qpair->ctrlr->listener->trid->trsvcid);
-
 	/* scan-build falsely reporting dereference of null pointer */
 	assert(group != NULL && group->sgroups != NULL);
 	ns_info = &group->sgroups[ctrlr->subsys->id].ns_info[nsid - 1];
@@ -3860,6 +3821,8 @@ nvmf_ctrlr_process_io_cmd(struct spdk_nvmf_request *req)
 	}
 
 	switch (cmd->opc) {
+	case SPDK_NVME_OPC_NDP:
+		return nvmf_ndp_cmd(bdev, desc, ch, req);
 	case SPDK_NVME_OPC_READ:
 		return nvmf_bdev_ctrlr_read_cmd(bdev, desc, ch, req);
 	case SPDK_NVME_OPC_WRITE:
@@ -4144,7 +4107,6 @@ void
 spdk_nvmf_request_exec(struct spdk_nvmf_request *req)
 {
 	struct spdk_nvmf_qpair *qpair = req->qpair;
-	struct spdk_nvmf_transport *transport = qpair->transport;
 	enum spdk_nvmf_request_exec_status status;
 
 	if (!spdk_nvmf_using_zcopy(req->zcopy_phase)) {
@@ -4160,10 +4122,9 @@ spdk_nvmf_request_exec(struct spdk_nvmf_request *req)
 	/* Place the request on the outstanding list so we can keep track of it */
 	nvmf_add_to_outstanding_queue(req);
 
-	if (spdk_unlikely((req->cmd->nvmf_cmd.opcode == SPDK_NVME_OPC_FABRIC) &&
-			  spdk_nvme_trtype_is_fabrics(transport->ops->type))) {
+	if (spdk_unlikely(req->cmd->nvmf_cmd.opcode == SPDK_NVME_OPC_FABRIC)) {
 		status = nvmf_ctrlr_process_fabrics_cmd(req);
-	} else if (spdk_unlikely(nvmf_qpair_is_admin_queue(qpair))) {
+	} else if (spdk_unlikely(nvmf_qpair_is_admin_queue(qpair))) {//TODO：在这里添加NDP分支
 		status = nvmf_ctrlr_process_admin_cmd(req);
 	} else {
 		status = nvmf_ctrlr_process_io_cmd(req);

@@ -2465,7 +2465,7 @@ nvmf_tcp_req_process(struct spdk_nvmf_tcp_transport *ttransport,
 		}
 		nvmf_tcp_req_set_state(tcp_req, TCP_REQUEST_STATE_COMPLETED);
 	}
-
+	spdk_log_set_flag("nvmf_tcp");
 	/* The loop here is to allow for several back-to-back state changes. */
 	do {
 		prev_state = tcp_req->state;
@@ -2519,7 +2519,7 @@ nvmf_tcp_req_process(struct spdk_nvmf_tcp_transport *ttransport,
 			nvmf_tcp_req_set_state(tcp_req, TCP_REQUEST_STATE_NEED_BUFFER);
 			STAILQ_INSERT_TAIL(&group->pending_buf_queue, &tcp_req->req, buf_link);
 			break;
-		case TCP_REQUEST_STATE_NEED_BUFFER:
+		case TCP_REQUEST_STATE_NEED_BUFFER://0x20主要少了这一步
 			spdk_trace_record(TRACE_TCP_REQUEST_STATE_NEED_BUFFER, 0, 0, (uintptr_t)tcp_req, tqpair);
 
 			assert(tcp_req->req.xfer != SPDK_NVME_DATA_NONE);
@@ -2531,7 +2531,7 @@ nvmf_tcp_req_process(struct spdk_nvmf_tcp_transport *ttransport,
 				/* This request needs to wait in line to obtain a buffer */
 				break;
 			}
-
+			SPDK_NOTICELOG("TCP_REQUEST_STATE_NEED_BUFFER TRIGGERS\n");
 			/* Try to get a data buffer */
 			rc = nvmf_tcp_req_parse_sgl(tcp_req, transport, group);
 			if (rc < 0) {
