@@ -1902,7 +1902,7 @@ print_performance(void)
 		       sum_ave_latency, min_latency_so_far, max_latency_so_far);
 		printf("\n");
 	}
-
+	printf("total completed io:%lld\n", total_io_completed);
 	if (g_latency_sw_tracking_level == 0 || total_io_completed == 0) {
 		return;
 	}
