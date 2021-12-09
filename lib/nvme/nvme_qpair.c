@@ -147,7 +147,7 @@ static const struct nvme_string sgl_subtype[] = {
 	{ SPDK_NVME_SGL_SUBTYPE_INVALIDATE_KEY, "INVALIDATE KEY" },
 	{ 0xFFFF, "RESERVED" }
 };
-
+static int g_count;
 static const char *
 nvme_get_string(const struct nvme_string *strings, uint16_t value)
 {
@@ -215,6 +215,7 @@ nvme_get_dptr(char *buf, size_t size, struct spdk_nvme_cmd *cmd)
 			break;
 		case SPDK_NVME_PSDT_SGL_MPTR_CONTIG:
 		case SPDK_NVME_PSDT_SGL_MPTR_SGL:
+			SPDK_NOTICELOG("sgl triggers\n");
 			nvme_get_sgl(buf, size, cmd);
 			break;
 		default:
@@ -232,7 +233,10 @@ nvme_admin_qpair_print_command(uint16_t qid, struct spdk_nvme_cmd *cmd)
 	assert(cmd != NULL);
 
 	nvme_get_dptr(dptr, sizeof(dptr), cmd);
-
+	g_count++;
+	if(g_count % 10 != 1)
+		return ;
+		
 	switch ((int)cmd->opc) {
 	case SPDK_NVME_OPC_SET_FEATURES:
 	case SPDK_NVME_OPC_GET_FEATURES:
@@ -449,7 +453,8 @@ spdk_nvme_print_completion(uint16_t qid, struct spdk_nvme_cpl *cpl)
 	if (cpl->sqid != qid && cpl->sqid != 0) {
 		SPDK_ERRLOG("sqid %u doesn't match qid\n", cpl->sqid);
 	}
-
+	if(g_count % 10 != 1)
+		return;
 	SPDK_NOTICELOG("%s (%02x/%02x) qid:%d cid:%d cdw0:%x sqhd:%04x p:%x m:%x dnr:%x\n",
 		       spdk_nvme_cpl_get_status_string(&cpl->status),
 		       cpl->status.sct, cpl->status.sc, qid, cpl->cid, cpl->cdw0,

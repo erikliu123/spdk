@@ -58,6 +58,8 @@
 
 static int bdev_nvme_config_json(struct spdk_json_write_ctx *w);
 
+static int g_aer_warning_count;
+
 struct nvme_bdev_io {
 	/** array of iovecs to transfer. */
 	struct iovec *iovs;
@@ -2826,7 +2828,9 @@ aer_cb(void *arg, const struct spdk_nvme_cpl *cpl)
 	union spdk_nvme_async_event_completion	event;
 
 	if (spdk_nvme_cpl_is_error(cpl)) {
-		SPDK_WARNLOG("AER request execute failed");
+		if(g_aer_warning_count % 10 == 0)
+			SPDK_WARNLOG("AER request execute failed\n");
+		g_aer_warning_count++;
 		return;
 	}
 
