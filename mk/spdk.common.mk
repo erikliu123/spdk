@@ -168,6 +168,11 @@ ifeq ($(CONFIG_RDMA),y)
 SYS_LIBS += -libverbs -lrdmacm
 endif
 
+ifeq ($(CONFIG_NDP),y)
+LDFLAGS += -L/usr/local/cuda-11.5/lib64 -lcudart #_static -lpthread
+endif
+
+
 ifeq ($(CONFIG_URING),y)
 SYS_LIBS += -luring
 ifneq ($(strip $(CONFIG_URING_PATH)),)
@@ -314,8 +319,9 @@ MAKEFLAGS += --no-print-directory
 
 C_SRCS += $(C_SRCS-y)
 CXX_SRCS += $(CXX_SRCS-y)
+CUDA_SRCS +=  $(CUDA_SRCS-y)
 
-OBJS = $(C_SRCS:.c=.o) $(CXX_SRCS:.cpp=.o)
+OBJS = $(CUDA_SRCS:.cu=.o) $(C_SRCS:.c=.o) $(CXX_SRCS:.cpp=.o) 
 
 DEPFLAGS = -MMD -MP -MF $*.d.tmp
 
@@ -327,8 +333,17 @@ COMPILE_C=\
 
 COMPILE_CXX=\
 	$(Q)echo "  CXX $S/$@"; \
-	$(CXX) -o $@ $(DEPFLAGS) $(CXXFLAGS) -c $< && \
+	$(CXX) -o $@ -fpermissive $(DEPFLAGS) $(CXXFLAGS) -c $< && \
 	mv -f $*.d.tmp $*.d && touch -c $@
+
+NVCCFLAGS += -MMD -MF $*.d.tmp
+
+#不能随便自定义一个变量在cc.mk里面，要使用标准的nvcc对应的编译变量，如NVCCFLAGS
+
+COMPILE_CUDA=\
+	$(Q)echo "  NVCC $S/$@ $(NVCCFLAGS) "; \
+	$(CUDACC) -o $@ $(NVCCFLAGS) -c $< && \
+	mv -f $*.d.tmp $*.d && touch -c $@ 
 
 ENV_LDFLAGS = $(if $(SPDK_NO_LINK_ENV),,$(ENV_LINKER_ARGS))
 
@@ -338,8 +353,8 @@ LINK_C=\
 	$(CC) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS)
 
 LINK_CXX=\
-	$(Q)echo "  LINK $(notdir $@)"; \
-	$(CXX) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS)
+	$(Q)echo "  LINK C++ $(notdir $@) $(LIBS) $(OBJS)"; \
+	$(CXX) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS) -L/usr/local/cuda-11.5/lib64 -lcudart 
 
 # Provide function to ease build of a shared lib
 define spdk_build_realname_shared_lib
@@ -460,6 +475,9 @@ UNINSTALL_HEADER=\
 
 %.o: %.cpp %.d $(MAKEFILE_LIST)
 	$(COMPILE_CXX)
+
+%.o: %.cu $(MAKEFILE_LIST)
+	$(COMPILE_CUDA)
 
 %.d: ;
 

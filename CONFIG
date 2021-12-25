@@ -191,3 +191,5 @@ CONFIG_USDT=n
 # Build with IDXD kernel support.
 # In this mode, SPDK shares the DSA device with the kernel.
 CONFIG_IDXD_KERNEL=n
+
+CONFIG_NDP=y

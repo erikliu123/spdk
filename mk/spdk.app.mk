@@ -68,7 +68,8 @@ empty_rule:
 	@:
 
 $(APP) : $(OBJS) $(SPDK_LIB_FILES) $(ENV_LIBS) $(VFIO_USER_LIB_FILE)
-	$(LINK_C)
+	echo $(APP) $(LDFLAGS) 
+	$(LINK_CXX)
 
 clean :
 	$(CLEAN_C) $(CLEAN_FILES)

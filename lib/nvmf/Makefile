@@ -39,10 +39,13 @@ SO_MINOR := 0
 
 C_SRCS = ctrlr.c ctrlr_discovery.c ctrlr_bdev.c \
 	 subsystem.c nvmf.c nvmf_rpc.c transport.c tcp.c
-
+	 
 C_SRCS-$(CONFIG_RDMA) += rdma.c
 LIBNAME = nvmf
 LOCAL_SYS_LIBS =
+
+CUDA_SRCS = ndp.cu
+
 ifeq ($(CONFIG_RDMA),y)
 LOCAL_SYS_LIBS += -libverbs -lrdmacm
 #Attach only if FreeBSD and RDMA is specified with configure
@@ -76,6 +79,15 @@ ifneq ($(strip $(CONFIG_FC_PATH)),)
 CFLAGS += -I$(CONFIG_FC_PATH)
 endif
 endif
+
+ifeq ($(CONFIG_NDP), y)
+NVCCFLAGS += -I./ndp 
+endif
+
+#echo "config ndp $(CUDA_FLAGS)"
+
+#CFLAGS += -lcudart -L/usr/local/cuda-11.5/lib64 #TODO ADD ndp CHOISE
+LDFLAGS += -L/usr/local/cuda-11.5/lib64 -lcudart #_static
 
 SPDK_MAP_FILE = $(abspath $(CURDIR)/spdk_nvmf.map)
 
