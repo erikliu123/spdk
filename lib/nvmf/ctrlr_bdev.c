@@ -50,6 +50,8 @@
 #include "spdk/log.h"
 #include "ndp.h"
 
+extern  int ndp_decompress(const char *filename, uint8_t **result, int opt);
+ 
 static bool
 nvmf_subsystem_bdev_io_type_supported(struct spdk_nvmf_subsystem *subsystem,
 				      enum spdk_bdev_io_type io_type)
@@ -98,6 +100,7 @@ nvmf_ndp_complete_cmd(struct spdk_bdev_io *bdev_io, bool success,
 	int				first_sc = 0, first_sct = 0, sc = 0, sct = 0;
 	uint32_t			cdw0 = 0;
 	struct spdk_nvmf_request	*first_req = req->first_fused_req;
+	int ret = 0;
 
 	if (spdk_unlikely(first_req != NULL)) {
 		/* fused commands - get status for both operations */
@@ -124,6 +127,15 @@ nvmf_ndp_complete_cmd(struct spdk_bdev_io *bdev_io, bool success,
 	ndp_req->read_bdev_blocks += 8;
 	if(ndp_req->read_bdev_blocks == 16)
 	{
+		uint8_t *buffer = NULL;
+		SPDK_NOTICELOG("#######CUDA lib call#######\n");
+		//func();
+		
+		ret = ndp_decompress("liu", &buffer, 1);
+		if(!ret)
+			free(buffer);
+		ndp_decompress("liu", &buffer, 0);
+		SPDK_NOTICELOG("#######CUDA lib call finished!#####\n");
 		spdk_nvmf_request_complete(req);
 		free(ndp_req);
 	}

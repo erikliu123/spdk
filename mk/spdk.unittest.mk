@@ -68,11 +68,11 @@ endif
 
 install: all
 
-all: $(APP)
+all: #$(APP)
 	@:
 
 $(APP) : $(OBJS) $(SPDK_LIB_FILES) $(ENV_LIBS)
-	$(LINK_C)
+	$(LINK_CXX)
 
 clean:
 	$(CLEAN_C) $(APP)

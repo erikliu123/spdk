@@ -43,10 +43,15 @@
 #include "spdk/queue.h"
 #include "spdk/util.h"
 #include "spdk_internal/usdt.h"
+#include "ndp.h"
 
 #define MAX_MEMPOOL_NAME_LENGTH 40
 #define NVMF_TRANSPORT_DEFAULT_ASSOCIATION_TIMEOUT_IN_MS 120000
 
+extern int ndp_init(void);
+extern int ndp_free(void);
+
+#define CONFIG_NDP
 struct nvmf_transport_ops_list_element {
 	struct spdk_nvmf_transport_ops			ops;
 	TAILQ_ENTRY(nvmf_transport_ops_list_element)	link;
@@ -262,6 +267,15 @@ spdk_nvmf_transport_create(const char *transport_name, struct spdk_nvmf_transpor
 		}
 	}
 
+#ifdef CONFIG_NDP
+	if(ndp_init())
+	{
+		SPDK_ERRLOG("FAIL to INIT NDP Environment\n");
+	}
+	else{
+		SPDK_NOTICELOG("INIT NDP Environment SUCCESSFULLY\n");
+	}
+#endif	
 	return transport;
 }
 
@@ -290,7 +304,9 @@ spdk_nvmf_transport_destroy(struct spdk_nvmf_transport *transport,
 		}
 		spdk_mempool_free(transport->data_buf_pool);
 	}
-
+#ifdef CONFIG_NDP
+	ndp_free();
+#endif	
 	return transport->ops->destroy(transport, cb_fn, cb_arg);
 }
 
