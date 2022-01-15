@@ -51,7 +51,8 @@
 #include "ndp.h"
 
 extern  int ndp_decompress(const char *filename, uint8_t **result, int opt);
- 
+extern	int process_image(struct ndp_request *ndp_req, char *input_name);
+
 static bool
 nvmf_subsystem_bdev_io_type_supported(struct spdk_nvmf_subsystem *subsystem,
 				      enum spdk_bdev_io_type io_type)
@@ -130,11 +131,14 @@ nvmf_ndp_complete_cmd(struct spdk_bdev_io *bdev_io, bool success,
 		uint8_t *buffer = NULL;
 		SPDK_NOTICELOG("#######CUDA lib call#######\n");
 		//func();
-		
+		process_image(ndp_req, "/home/femu/spdk/lib/nvmf/data/test.jpeg");
+		ret = ndp_decompress("liu", &buffer, 0);
+		if(!ret)
+			free(buffer);
 		ret = ndp_decompress("liu", &buffer, 1);
 		if(!ret)
 			free(buffer);
-		ndp_decompress("liu", &buffer, 0);
+		
 		SPDK_NOTICELOG("#######CUDA lib call finished!#####\n");
 		spdk_nvmf_request_complete(req);
 		free(ndp_req);
@@ -327,6 +331,36 @@ nvmf_bdev_zcopy_enabled(struct spdk_bdev *bdev)
 {
 	return spdk_bdev_io_type_supported(bdev, SPDK_BDEV_IO_TYPE_ZCOPY);
 }
+
+
+int
+nvmf_ndp_execute_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
+			 struct spdk_io_channel *ch, struct spdk_nvmf_request *req)
+{
+	struct spdk_nvme_cpl *response = &req->rsp->nvme_cpl;      
+	struct ndp_request *ndp_req = malloc(sizeof(ndp_req));
+	int ret;
+
+	response->cdw0 = 0;
+    response->status.sc = SPDK_NVME_SC_INVALID_FILE;
+    response->status.sct = 0;
+
+	ndp_req->nvmf_req = req;
+	ndp_req->desc = desc;
+	ndp_req->io_ch = ch;
+	/*如果传过来了json文件，可以参考写命令读取这部分*/
+
+	//直接执行ndp任务
+	ret = process_image(ndp_req, "/mnt/ndp/test.bmp");
+	if(ret != 0)
+	{
+		spdk_nvmf_request_complete(req);
+		free(ndp_req);
+		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
+	}
+	return SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
+}
+
 
 int
 nvmf_ndp_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,

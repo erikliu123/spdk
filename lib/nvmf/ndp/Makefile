@@ -31,70 +31,20 @@
 #  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-SPDK_ROOT_DIR := $(abspath $(CURDIR)/../..)
+SPDK_ROOT_DIR := $(abspath $(CURDIR)/../../..)
 include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
 
 SO_VER := 10
 SO_MINOR := 0
 
-C_SRCS = ctrlr.c ctrlr_discovery.c ctrlr_bdev.c \
-	 subsystem.c nvmf.c nvmf_rpc.c transport.c tcp.c
+#CXX_SRCS = file_info.cpp
 
-#CUDA_SRCS-$(CONFIG_NDP) = file_info.cu #不这么使用, 但是为什么还是加了两次呢
-C_SRCS-$(CONFIG_RDMA) += rdma.c
-LIBNAME = nvmf
-LOCAL_SYS_LIBS =
-
-CUDA_SRCS = file_info.cu ndp.cu ndp_cv.cu 
-#DIRS-$(CONFIG_NDP) += ndp #当前有问题，子目录肯定是更好的方式
-
-ifeq ($(CONFIG_RDMA),y)
-LOCAL_SYS_LIBS += -libverbs -lrdmacm
-#Attach only if FreeBSD and RDMA is specified with configure
-ifeq ($(OS),FreeBSD)
-# Mellanox - MLX4 HBA Userspace Library
-ifneq ("$(wildcard /usr/lib/libmlx4.*)","")
-LOCAL_SYS_LIBS += -lmlx4
-endif
-# Mellanox - MLX5 HBA Userspace Library
-ifneq ("$(wildcard /usr/lib/libmlx5.*)","")
-LOCAL_SYS_LIBS += -lmlx5
-endif
-# Chelsio HBA Userspace Library
-ifneq ("$(wildcard /usr/lib/libcxgb4.*)","")
-LOCAL_SYS_LIBS += -lcxgb4
-endif
-endif
-endif
-
-ifeq ($(CONFIG_VFIO_USER), y)
-C_SRCS += vfio_user.c
-CFLAGS += -I$(VFIO_USER_INCLUDE_DIR)
-LDFLAGS += -L$(VFIO_USER_LIBRARY_DIR)
-LOCAL_SYS_LIBS += -Wl,-Bstatic -lvfio-user -Wl,-Bdynamic -ljson-c
-endif
-
-ifeq ($(CONFIG_FC),y)
-C_SRCS += fc.c fc_ls.c
-CFLAGS += -I$(CURDIR) $(ENV_CFLAGS)
-ifneq ($(strip $(CONFIG_FC_PATH)),)
-CFLAGS += -I$(CONFIG_FC_PATH)
-endif
-endif
-
+LIBNAME = ndp_env
 ifeq ($(CONFIG_NDP), y)
-#LIBS += -lspdk_ndp_env
 NVCCFLAGS += -Indp  `pkg-config opencv4 --cflags` -MMD -MF $*.d.tmp
 #单独编译图像处理文件
 LDFLAGS += -L/usr/local/cuda-11.5/lib64 -lcudart -Idlib dlib/dlib/all/source.cpp -lpthread -lX11 `pkg-config opencv4  --libs` 
 endif
-
-all: $(DIRS-y)
-	$(Q)echo "sasdsddsasaddasscan0..." ;
-
-clean: $(DIRS-y)
-
-include $(SPDK_ROOT_DIR)/mk/spdk.subdirs.mk
 
 #echo "config ndp $(CUDA_FLAGS)"
 

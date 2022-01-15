@@ -1423,6 +1423,7 @@ enum spdk_nvme_generic_command_status_code {
 	SPDK_NVME_SC_NAMESPACE_NOT_READY		= 0x82,
 	SPDK_NVME_SC_RESERVATION_CONFLICT               = 0x83,
 	SPDK_NVME_SC_FORMAT_IN_PROGRESS                 = 0x84,
+	SPDK_NVME_SC_INVALID_FILE						= 0X85,
 };
 
 /**
