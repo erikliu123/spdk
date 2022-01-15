@@ -134,6 +134,9 @@ endif
 # Prevent accidental multiple definitions of global variables
 COMMON_CFLAGS += -fno-common
 
+#NVCC ,这个文件会被执行多次
+#NVCCFLAGS = -MMD -MF $*.d.tmp  
+
 # Enable full RELRO - no lazy relocation (resolve everything at load time).
 # This allows the GOT to be made read-only early in the loading process.
 ifneq ($(OS),Windows)
@@ -168,9 +171,11 @@ ifeq ($(CONFIG_RDMA),y)
 SYS_LIBS += -libverbs -lrdmacm
 endif
 
-ifeq ($(CONFIG_NDP),y)
-LDFLAGS += -L/usr/local/cuda-11.5/lib64 -lcudart #_static -lpthread
-endif
+#CFLAGS += -DSPDK_CONFIG_FUSE
+#ifeq ($(CONFIG_NDP),y)
+#LDFLAGS += -L/usr/local/cuda-11.5/lib64 -lcudart -lpthread -lX11 `pkg-config opencv4  --libs` -I lib/nvmf/dlib/dlib/all/source.cpp  #_static -lpthread
+#NVCCFLAGS +=  `pkg-config opencv4 --cflags`  -I lib/nvmf/dlib lib/nvmf/dlib/dlib/all/source.cpp 
+#endif
 
 
 ifeq ($(CONFIG_URING),y)
@@ -321,7 +326,7 @@ C_SRCS += $(C_SRCS-y)
 CXX_SRCS += $(CXX_SRCS-y)
 CUDA_SRCS +=  $(CUDA_SRCS-y)
 
-OBJS = $(CUDA_SRCS:.cu=.o) $(C_SRCS:.c=.o) $(CXX_SRCS:.cpp=.o) 
+OBJS = $(CUDA_SRCS:.cu=.o) $(CXX_SRCS:.cpp=.o)  $(C_SRCS:.c=.o) 
 
 DEPFLAGS = -MMD -MP -MF $*.d.tmp
 
@@ -336,13 +341,18 @@ COMPILE_CXX=\
 	$(CXX) -o $@ -fpermissive $(DEPFLAGS) $(CXXFLAGS) -c $< && \
 	mv -f $*.d.tmp $*.d && touch -c $@
 
-NVCCFLAGS += -MMD -MF $*.d.tmp
 
 #不能随便自定义一个变量在cc.mk里面，要使用标准的nvcc对应的编译变量，如NVCCFLAGS
+NVCC = nvcc
+
+#有效的方式，但是不应该在这里面加存在问题
+#ifeq ($(CONFIG_NDP), y) 
+#LIBS += -lspdk_ndp_env
+#endif
 
 COMPILE_CUDA=\
 	$(Q)echo "  NVCC $S/$@ $(NVCCFLAGS) "; \
-	$(CUDACC) -o $@ $(NVCCFLAGS) -c $< && \
+	$(NVCC) -o $@ $(NVCCFLAGS) -c $< && \
 	mv -f $*.d.tmp $*.d && touch -c $@ 
 
 ENV_LDFLAGS = $(if $(SPDK_NO_LINK_ENV),,$(ENV_LINKER_ARGS))
@@ -353,8 +363,10 @@ LINK_C=\
 	$(CC) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS)
 
 LINK_CXX=\
-	$(Q)echo "  LINK C++ $(notdir $@) $(LIBS) $(OBJS)"; \
-	$(CXX) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS) -L/usr/local/cuda-11.5/lib64 -lcudart 
+	$(Q)echo "  LINK C++ $(notdir $@) $(LIBS) $(OBJS) $(LDFLAGS)"; \
+	$(CXX) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS) -L/usr/local/cuda-11.5/lib64 -lcudart \
+	-I /home/femu/spdk/lib/nvmf/dlib /home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp -lpthread -lX11 `pkg-config opencv4  --libs` 
+
 
 # Provide function to ease build of a shared lib
 define spdk_build_realname_shared_lib
