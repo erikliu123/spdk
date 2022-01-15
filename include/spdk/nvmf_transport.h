@@ -495,8 +495,8 @@ spdk_nvmf_req_get_xfer(struct spdk_nvmf_request *req) {
 	{
 		xfer = spdk_nvme_opc_get_data_transfer(cmd->opc);
 	}
-	if(sgl && cmd->opc != SPDK_NVME_OPC_KEEP_ALIVE)
-		SPDK_NOTICELOG("op[%u] xfer direction [%d] sgl type [%d] len[%d]\n",cmd->opc, xfer, sgl->generic.type, sgl->unkeyed.length);
+	// if(sgl && cmd->opc != SPDK_NVME_OPC_KEEP_ALIVE)
+	// 	SPDK_NOTICELOG("op[%u] xfer direction [%d] sgl type [%d] len[%d]\n",cmd->opc, xfer, sgl->generic.type, sgl->unkeyed.length);
 
 	// if (xfer == SPDK_NVME_DATA_NONE && cmd->opc != 0x20)
 	// {
