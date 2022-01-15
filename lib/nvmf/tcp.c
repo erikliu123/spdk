@@ -2531,7 +2531,7 @@ nvmf_tcp_req_process(struct spdk_nvmf_tcp_transport *ttransport,
 				/* This request needs to wait in line to obtain a buffer */
 				break;
 			}
-			SPDK_NOTICELOG("TCP_REQUEST_STATE_NEED_BUFFER TRIGGERS\n");
+			//SPDK_NOTICELOG("OPCODE [%d], TCP_REQUEST_STATE_NEED_BUFFER TRIGGERS\n", tcp_req->cmd.opc);
 			/* Try to get a data buffer */
 			rc = nvmf_tcp_req_parse_sgl(tcp_req, transport, group);
 			if (rc < 0) {
