@@ -305,7 +305,7 @@ spdk_nvmf_transport_destroy(struct spdk_nvmf_transport *transport,
 		spdk_mempool_free(transport->data_buf_pool);
 	}
 #ifdef CONFIG_NDP
-	ndp_free();
+	//ndp_free();
 #endif	
 	return transport->ops->destroy(transport, cb_fn, cb_arg);
 }
