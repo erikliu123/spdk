@@ -39,6 +39,7 @@ struct cudaPreAlloc
   struct {
     Color32 *decompressResult;
     BlockDXT1 *inputImage;
+    void *devHostDataToDevice;
   } compressTask;
 
 };

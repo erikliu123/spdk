@@ -22,6 +22,7 @@
     exit(-1);             \
   }
 
+extern int produce_fsinfo(const char *path, int depth);
 
 __global__ void Kerneltest(int **da, unsigned int rows, unsigned int cols)
 {
@@ -86,7 +87,8 @@ void decompress_simple(BlockDXT1 *dxt, Color32 *colors, int width)
   }
 }
 
-__global__ void ndp_accelerate_decompress(BlockDXT1 *input, Color32 *output, int height, int width)
+__global__ void 
+ndp_accelerate_decompress(BlockDXT1 *input, Color32 *output, int height, int width)
 {
   Color32 palette[4];
   //获取当前block应该处理的图像区域
@@ -152,8 +154,15 @@ extern "C"
 {
   int ndp_init(void)
   {
+    produce_fsinfo(DEFAULT_NDP_DIR,0); //加载系统的文件信息
     checkCudaErrors(cudaMalloc((void **)&(gAlloc.compressTask.inputImage),MAX_COMPRESS_SIZE));
+#ifdef ZERO_COPY    
+    checkCudaErrors(cudaSetDeviceFlags(cudaDeviceMapHost));
+    checkCudaErrors(cudaHostAlloc((void **)&(gAlloc.compressTask.decompressResult), MAX_COMPRESS_SIZE * 8, cudaHostAllocWriteCombined | cudaHostAllocMapped));
+    checkCudaErrors(cudaHostGetDevicePointer((void **)&gAlloc.compressTask.devHostDataToDevice, gAlloc.compressTask.decompressResult, 0));
+#else
     checkCudaErrors(cudaMalloc((void **)&(gAlloc.compressTask.decompressResult), MAX_COMPRESS_SIZE * 8));
+#endif    
     return 0;
   }
 
@@ -216,10 +225,11 @@ extern "C"
     fread(compressImageBuffer, header.pitch, 1, fp);
     fclose(fp);
     uint64_t cuda_start_ticks = 0, cuda_memcpy_ticks = 0, cuda_end_ticks = 0,
-      cuda_host_ticks = 0;
+    cuda_host_ticks = 0;
     //解压缩操作
     if(opt == 0){
       cuda_memcpy_ticks = spdk_get_ticks();
+      for(int k = 0; k<10; k++)//假设有500张图片
       for (uint y = 0; y < h; y += 4)
       {
         for (uint x = 0; x < w; x += 4)
@@ -241,16 +251,35 @@ extern "C"
         int GridSize = (header.width/4 * header.height/4 + (BlockSize*BlockSize - 1)) / (BlockSize*BlockSize);
         dim3 threadPerBlock(BlockSize, BlockSize);
         dim3 numBlocks(GridSize, 1);
+        uint64_t temp_start_ticks, temp_end_ticks;
         cuda_start_ticks = spdk_get_ticks();
-        cudaMemcpy(gAlloc.compressTask.inputImage, compressImageBuffer, header.pitch, cudaMemcpyHostToDevice);
-        cuda_memcpy_ticks = spdk_get_ticks();
-        ndp_accelerate_decompress<<<numBlocks, threadPerBlock>>>(gAlloc.compressTask.inputImage, gAlloc.compressTask.decompressResult, H, W);
-        cuda_end_ticks = spdk_get_ticks();
-        cudaMemcpy(h_result, gAlloc.compressTask.decompressResult, w * h * 4, cudaMemcpyDeviceToHost);
-        cuda_host_ticks = spdk_get_ticks();
-
+        for(int k = 0; k<10; k++){
+          temp_start_ticks = spdk_get_ticks();
+          cudaMemcpy(gAlloc.compressTask.inputImage, compressImageBuffer, header.pitch, cudaMemcpyHostToDevice);
+          cuda_memcpy_ticks = spdk_get_ticks();
+          if((1000 * (cuda_memcpy_ticks - temp_start_ticks) / ticks_per_second) > 1) 
+          {
+             SPDK_INFOLOG(ndp, "[%d] NDP's memcpy time too high... %ld (us)\n", k, 1000000 * (cuda_memcpy_ticks - temp_start_ticks) / ticks_per_second);
+          }
+          ndp_accelerate_decompress<<<numBlocks, threadPerBlock>>>(gAlloc.compressTask.inputImage, gAlloc.compressTask.decompressResult, H, W);
+          checkCudaErrors(cudaDeviceSynchronize());
+         
+          
+          temp_end_ticks = spdk_get_ticks();
+          cudaMemcpy(h_result, gAlloc.compressTask.decompressResult, w * h * 4, cudaMemcpyDeviceToHost);
+          if((1000 * 1000 *(temp_end_ticks - cuda_memcpy_ticks) / ticks_per_second) > 50) 
+          {
+             SPDK_INFOLOG(ndp, "[%d] NDP's kernel time too high... %ld (us)\n", k, 1000000 * (temp_end_ticks - cuda_memcpy_ticks) / ticks_per_second);
+          }
+        }
     }
+  
+#ifdef ZERO_COPY
+    sdkSavePPM4ub("/home/femu/shell/ljh_cuda.ppm", opt ? (unsigned char *)gAlloc.compressTask.devHostDataToDevice:h_result, w, h);
+#else
     sdkSavePPM4ub("/home/femu/shell/ljh_cuda.ppm", h_result, w, h);
+#endif
+
     *result = h_result;
     free(compressImageBuffer);
     end_ticks = spdk_get_ticks();
@@ -264,10 +293,9 @@ extern "C"
     return 0;
   }
 
-  //读取存储相关的数据后, 执行NDP加速
-  /*
-  */
-  //一个完整的NDP命令
+  /* 读取存储相关的数据后, 执行NDP加速 */
+
+  /* 一个完整的NDP命令，连通性的的验证 */
 
   int func(void) // 注意这里定义形式
   {
