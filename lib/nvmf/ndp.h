@@ -6,6 +6,7 @@
 #define BDEV_NAME "Malloc0" 
 #define BLK_SIZE 512
 #define BLK_SHIFT_BIT 9
+#define FILE_SYS_BIT 12
 #define MB (1024 * 1024)
 #define MAX_GRAPH (1024 * 1024)
 #define MAX_COMPRESS_SIZE (MAX_GRAPH) //分大一点似乎好一点？
@@ -21,7 +22,7 @@ struct ndp_request
 
     union 
     {
-        char *read_ptr;
+        unsigned char *read_ptr;
     } ptr;
     
 };

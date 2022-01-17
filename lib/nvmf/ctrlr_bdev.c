@@ -463,10 +463,10 @@ nvmf_bdev_ctrlr_read_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 	SPDK_NOTICELOG("Read NLB[%ld], block size[%u], SGL length[%u] \n",  
 		num_blocks, block_size, req->length);
 	SPDK_NOTICELOG("io vector number [%d], io vec info:\n", req->iovcnt);
-	for(int i=0; i<(int)req->iovcnt; i++)
-	{
-		printf("[%ld] ", req->iov[i].iov_len);
-	}
+	// for(int i=0; i<(int)req->iovcnt; i++)
+	// {
+	// 	printf("[%ld] ", req->iov[i].iov_len);
+	// }
 	SPDK_NOTICELOG("\n");
 
 	if (spdk_unlikely(num_blocks * block_size > req->length)) {

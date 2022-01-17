@@ -73,7 +73,7 @@ extern "C"{
 #include "nvmf_internal.h"
 };
 
-//#define SPDK_READ
+#define SPDK_READ
 #ifdef SPDK_READ
 #include "spdk/env.h"
 #include "spdk/bdev.h"
@@ -91,7 +91,7 @@ static void ndp_face_detection_complete(struct spdk_bdev_io *bdev_io, bool succe
     uint32_t cdw0 = 0;
 
     spdk_bdev_io_get_nvme_status(bdev_io, &cdw0, &sct, &sc);//假设中途没有数据块读取错误
-    SPDK_NOTICELOG("sct=%d, sc=%d\n", sct, sc);
+    SPDK_NOTICELOG("cdw0=%d sct=%d, sc=%d\n",cdw0, sct, sc);
     response->cdw0 = cdw0;
     response->status.sc = sc;
     response->status.sct = sct;
@@ -99,42 +99,103 @@ static void ndp_face_detection_complete(struct spdk_bdev_io *bdev_io, bool succe
 
     ndp_req->read_bdev_blocks++;
     spdk_bdev_free_io(bdev_io);
-    SPDK_NOTICELOG("READ_BLKs=%d, total %d\n", ndp_req->read_bdev_blocks, ndp_req->total_bdev_blocks);
+    SPDK_NOTICELOG("continuous blk: %d, total read blocks:%d\n", ndp_req->read_bdev_blocks, ndp_req->total_bdev_blocks);
     if (ndp_req->read_bdev_blocks == ndp_req->total_bdev_blocks)
     {
         //读取人脸
         ndp_req->end_io_time = spdk_get_ticks();
-        SPDK_NOTICELOG("IO consume: %d ticks\n", ndp_req->end_io_time - ndp_req->start_io_time);
         //拷贝一下
-        char *temp = new char[ndp_req->total_len];//(char *)malloc(ndp_req->total_len);
+        uchar *temp = new uchar[3 * 1024 * 1024];
+        // uchar *temp = (uchar *)malloc(3*1024*1024) ;//uchar[3*1024*1024/*ndp_req->total_len*/];//(char *)malloc
+        //[1]);
+        //spdk_dma_free(ndp_req->ptr.read_ptr);
+        //ndp_req->ptr.read_ptr = temp;
+        SPDK_NOTICELOG("IO consume: %d ticks, HEADER[%x]\n", ndp_req->end_io_time - ndp_req->start_io_time, ndp_req->ptr.read_ptr[0]
+        );
+#if 0        
+        for(int i=0; i< 100 * 256; i += 256)//为什么读出来全都是0。。。
+        {
+            if(i%16 == 0)
+            {
+                printf("\n%08x: ", i);
+            }
+            if(1 || ndp_req->ptr.read_ptr[i] != 0)
+            {
+               
+                printf("%02x ", ndp_req->ptr.read_ptr[i]);
+            }
+        }
+        putchar('\n');
+        fflush(stdout);
+        // return ;
+#endif  
+        //必须要将图片进行翻转！    
+        for(int i = 0; i < 360; i++)
+        {
+            for(int j = 0; j < 1080; j++)
+            {
+                int src_index = 3*(i*1080 + j) + 0x8a;
+                int dst_index = 3*((719-i)*1080 + j) + 0x8a;
+                //int src_index = index + 0x8a;
+                for(int k=0; k<3; k++)
+                std::swap(ndp_req->ptr.read_ptr[src_index + k], ndp_req->ptr.read_ptr[dst_index + k]);
+
+            }
+        }
+        memcpy(temp, ndp_req->ptr.read_ptr + 0x8a, ndp_req->total_len);
         //memcpy(temp, ndp_req->ptr.read_ptr + 0x8a, ndp_req->total_len - 0x8a);
-        cv::Mat frame(720, 100, CV_8UC3, temp);//ndp_req->ptr.read_ptr + 0x8a); //简单粗暴处理先
-        cv::Mat dst;
+        cv::Mat frame(720, 1080, CV_8UC3, ndp_req->ptr.read_ptr + 0x8a); //1080*3);//ndp_req->ptr.read_ptr + 0x8a); //简单粗暴处理先
+        //frame.setDefaultAllocator()
+        cv::Mat dst(720, 1080, CV_8UC3, temp);
+        //= frame.clone();
+        //assert(dst.u->data != frame.u->data);
         //提取灰度图
         cv::cvtColor(frame, dst, CV_BGR2GRAY);
 
         //加载dlib的人脸识别器
         dlib::frontal_face_detector detector = dlib::get_frontal_face_detector();//这个地方为什么报错了？？
 
-        //加载人脸形状探测器, TODO:变成非人脸
+        //加载人脸形状探测器, TODO:从spdk bdev加载
         dlib::shape_predictor sp;
-        dlib::deserialize("/mnt/ndp/shape_predictor_68_face_landmarks.dat") >> sp;
-
+        //dlib::deserialize("/mnt/ndp/shape_predictor_68_face_landmarks.dat") >> sp;
+        dlib::deserialize("/home/femu/spdk/lib/nvmf/data/shape_predictor_68_face_landmarks.dat") >>sp;
         // Mat转化为dlib的matrix
         dlib::array2d<dlib::bgr_pixel> dimg;
+        //调用assign_image()方法，不仅可以完成类型转化，而且，按照文档里说的，不用对传入的数据进行拷贝，所以虽然在进行数据类型转换，但是耗费的时间比较低。
         dlib::assign_image(dimg, dlib::cv_image<uchar>(dst));
 
         //获取一系列人脸所在区域
         std::vector<dlib::rectangle> dets = detector(dimg);
+        int i = 0;
         std::cout << "Number of faces detected: " << dets.size() << std::endl;
 
-        if (dets.size() == 0)
+        
+        //dlib::load_image(dimg, "/mnt/ndp/test.bmp");// what():  bmp load error 6: header too small
+        
+        if (dets.size() == 0){
+            SPDK_NOTICELOG("#######face detection call finished!#####\n");
+            spdk_nvmf_request_complete(req);
+            free(temp);
+        
+            free(ndp_req);
             return;
+        }
+
+        // for (i = 0; i < dets.size(); i++)
+        // {
+        //     //画出人脸所在区域
+        //     cv::Rect r;
+        //     r.x = dets[i].left();
+        //     r.y = dets[i].top();
+        //     r.width = dets[i].width();
+        //     r.height = dets[i].height();
+        //     printf("%d %d %d %d\n", r.x, r.y, r.width, r.height);
+        // }
+        // fflush(stdout);
 
         //获取人脸特征点分布
         std::vector<dlib::full_object_detection> shapes;
-        int i = 0;
-        for (i = 0; i < dets.size(); i++)
+        for (i = 0; i < dets.size(); i++)//TODO 什么出现malloc失败？
         {
             dlib::full_object_detection shape = sp(dimg, dets[i]); //获取指定一个区域的人脸形状
             shapes.push_back(shape);
@@ -156,6 +217,7 @@ static void ndp_face_detection_complete(struct spdk_bdev_io *bdev_io, bool succe
         //把结果返回
         // cv::imshow("frame", frame);
         SPDK_NOTICELOG("#######face detection call finished!#####\n");
+        fflush(stdout);
         spdk_nvmf_request_complete(req);
         //free(temp);
         //free(ndp_req->ptr.read_ptr);
@@ -187,8 +249,10 @@ extern "C"
             return -ENOENT;
         }
 
-        char *readbuf = (char *)spdk_dma_zmalloc(lba.first + BLKSIZE, 0x1000, NULL);
+        unsigned char *readbuf = (unsigned char *)spdk_dma_zmalloc(lba.first + BLK_SIZE, 0x200000, NULL);
+       
         assert(readbuf != NULL);
+        readbuf[0] = 0x30;
         //  char *readbuf = (char *)malloc(lba.first + BLKSIZE);
         ndp_req->read_bdev_blocks = 0;
         ndp_req->total_bdev_blocks = lba.second.size();
@@ -201,7 +265,14 @@ extern "C"
         int offset = 0;
         for (int i = 0; i < lba.second.size(); i++)
         {
-            spdk_bdev_read(ndp_req->desc, ndp_req->io_ch, readbuf + offset, lba.second[i].first_block << BLK_SHIFT_BIT, lba.second[i].block_count << BLK_SHIFT_BIT, ndp_face_detection_complete, ndp_req);
+            // struct spdk_nvme_cmd nvme_cmd;
+            // nvme_cmd.nsid = 0x1;
+            // nvme_cmd.opc = 0x2;
+            // nvme_cmd.cdw10 = 0x0;
+            // nvme_cmd.cdw11 = 0x0;
+            //spdk_bdev_nvme_io_passthru(ndp_req->desc, ndp_req->io_ch, &nvme_cmd, readbuf, 0x100, ndp_face_detection_complete, ndp_req);
+            spdk_bdev_read(ndp_req->desc, ndp_req->io_ch, readbuf + offset, lba.second[i].first_block<< FILE_SYS_BIT , lba.second[i].block_count << BLK_SHIFT_BIT, ndp_face_detection_complete, ndp_req);
+            // spdk_bdev_read(ndp_req->desc, ndp_req->io_ch, readbuf + offset, 0x400 , 512, ndp_face_detection_complete, ndp_req);
             offset += lba.second[i].block_count << BLK_SHIFT_BIT;
             SPDK_NOTICELOG("read lba[%d], len[%d]\n", lba.second[i].first_block, lba.second[i].block_count<<BLK_SHIFT_BIT);
         }

@@ -3082,6 +3082,9 @@ nvme_ctrlr_async_event_cb(void *arg, const struct spdk_nvme_cpl *cpl)
 		 */
 		return;
 	}
+	spdk_log_set_flag("ctrlr");//打开此标志才有打印
+	NVME_CTRLR_ERRLOG(ctrlr, "abnormal things happen, sct: %d, sc: %d\n", cpl->status.sct, cpl->status.sc);
+	return ;
 
 	if (cpl->status.sct == SPDK_NVME_SCT_COMMAND_SPECIFIC &&
 	    cpl->status.sc == SPDK_NVME_SC_ASYNC_EVENT_REQUEST_LIMIT_EXCEEDED) {

@@ -363,10 +363,12 @@ LINK_C=\
 	$(CC) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS)
 
 LINK_CXX=\
-	$(Q)echo "  LINK C++ $(notdir $@) $(LIBS) $(OBJS) $(LDFLAGS)"; \
+	$(Q)echo "  LINK C++ $(notdir $@) $(LIBS) $(OBJS) $(LDFLAGS) ENV_LD:$(ENV_LDFLAGS)"; \
 	$(CXX) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS) -L/usr/local/cuda-11.5/lib64 -lcudart \
 	-I /home/femu/spdk/lib/nvmf/dlib /home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp -lpthread -lX11 `pkg-config opencv4  --libs` 
 
+#$(NVCC) -o $@ $(CPPFLAGS) $(OBJS) \
+	-lspdk_bdev_passthru -lspdk_bdev_error -lspdk_bdev_gpt -lspdk_bdev_split -lspdk_bdev_raid -lspdk_bdev_lvol -lspdk_blobfs_bdev -lspdk_blobfs -lspdk_blob_bdev -lspdk_lvol -lspdk_blob -lspdk_bdev_aio -lspdk_conf -lspdk_event_nbd -lspdk_nbd -lspdk_event_vhost -lspdk_vhost -lspdk_event_scheduler -lspdk_event -lspdk_event_scsi -lspdk_scsi -lspdk_event_bdev -lspdk_bdev -lspdk_notify -lspdk_event_accel -lspdk_accel -lspdk_event_vmd -lspdk_vmd -lspdk_event_sock -lspdk_init -lspdk_thread -lspdk_trace -lspdk_sock -lspdk_env_dpdk_rpc -lspdk_rpc -lspdk_jsonrpc -lspdk_json -lspdk_util -lspdk_log -L/usr/local/cuda-11.5/lib64 -lcudart -I /home/femu/spdk/lib/nvmf/dlib /home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp -lpthread -lX11 `pkg-config opencv4  --libs` #--fuse-ld=bdf
 
 # Provide function to ease build of a shared lib
 define spdk_build_realname_shared_lib

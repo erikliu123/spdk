@@ -84,7 +84,7 @@ endif
 
 ifeq ($(CONFIG_NDP), y)
 #LIBS += -lspdk_ndp_env
-NVCCFLAGS += -Indp  `pkg-config opencv4 --cflags` -MMD -MF $*.d.tmp
+NVCCFLAGS += -Indp -g  `pkg-config opencv4 --cflags` -MMD -MF $*.d.tmp
 #单独编译图像处理文件
 LDFLAGS += -L/usr/local/cuda-11.5/lib64 -lcudart -Idlib dlib/dlib/all/source.cpp -lpthread -lX11 `pkg-config opencv4  --libs` 
 endif

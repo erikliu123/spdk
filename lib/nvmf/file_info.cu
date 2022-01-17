@@ -73,7 +73,7 @@ int walk_fibmap (int fd, struct stat *st, unsigned int blksize, unsigned int sec
 			 * Continuation of extent: Bump last_block and block_count.
 			 */
 			//ext.last_block = blknum64 ? blknum64 : hole;
-			ext.block_count += FS_BLKSIZE/SECTORSIZE;
+			ext.block_count += (FS_BLKSIZE/SECTORSIZE);
 		} else {
 			/*
 			 * New extent: print previous extent (if any), and re-init the extent record.
@@ -155,6 +155,7 @@ int produce_fsinfo(const char *path, int depth)
             extent_num = walk_fibmap(fd, &statbuf, FS_BLKSIZE, FS_BLKSIZE / SECTORSIZE, 0, lba); 
             if(extent_num > 0)
                 file_lbas_map[cur] = std::make_pair(statbuf.st_size,lba);
+            printf("%s: %lu\n", cur, statbuf.st_size);
             close(fd);
         }
     }
