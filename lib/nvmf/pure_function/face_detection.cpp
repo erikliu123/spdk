@@ -1,9 +1,9 @@
-#include "dlib/dlib/image_processing/frontal_face_detector.h"
-#include "dlib/dlib/image_processing/render_face_detections.h"
-#include "dlib/dlib/image_processing.h"
-#include "dlib/dlib/gui_widgets.h"
-#include "dlib/dlib/image_io.h"
-#include "dlib/dlib/opencv.h"
+#include "dlib/image_processing/frontal_face_detector.h"
+//#include "dlib/image_processing/render_face_detections.h"
+#include "dlib/image_processing.h"
+//#include "dlib/gui_widgets.h"
+#include "dlib/image_io.h"
+#include "dlib/opencv.h"
 
 #include <iostream>
 #include "opencv2/opencv.hpp"
@@ -16,6 +16,8 @@
 //由于dlib和opencv中有相当一部分类同名，故不能同时对它们使用using namespace，否则会出现一些莫名其妙的问题
 // using namespace dlib;
 using namespace std;
+
+
 // using namespace cv;
 //  void func()
 //  {
@@ -109,6 +111,38 @@ void line_one_face_detections(cv::Mat img, std::vector<dlib::full_object_detecti
         }
     }
 }
+
+
+// void cnn_process(uchar *read_ptr)
+// {
+//     for (int i = 0; i < 360; i++)
+//     {
+//         for (int j = 0; j < 1080; j++)
+//         {
+//             int src_index = 3 * (i * 1080 + j) + 0x8a;
+//             int dst_index = 3 * ((719 - i) * 1080 + j) + 0x8a;
+//             // int src_index = index + 0x8a;
+//             for (int k = 0; k < 3; k++)
+//                 std::swap(read_ptr[src_index + k], read_ptr[dst_index + k]);
+//         }
+//     }
+//     // memcpy(temp, read_ptr + 0x8a, ndp_req->total_len - 0x8a);
+//     cv::Mat frame(720, 1080, CV_8UC3, read_ptr + 0x8a); //+ 0x8a);//1080*3);//read_ptr + 0x8a); //简单粗暴处理先
+//     // frame.setDefaultAllocator()
+//     cv::Mat dst = frame.clone();
+//     //提取灰度图
+//     cv::cvtColor(frame, dst, CV_BGR2GRAY);
+//     net_type net;
+//     dlib::matrix<rgb_pixel> img;//读取数据
+//     //调用assign_image()方法，不仅可以完成类型转化，而且，按照文档里说的，不用对传入的数据进行拷贝，所以虽然在进行数据类型转换，但是耗费的时间比较低。
+//     //dlib::assign_image(dimg, dlib::cv_image<uchar>(dst));
+//     dlib::assign_image(img, cv_image<uchar>(dst)); //cv_image<rgb_pixel>(dst)会报错
+//     load_image(img, "/mnt/ndp/test.bmp");
+//     /*TODO：malloc有问题，先不管了。。*/
+//     dlib::deserialize("/home/femu/spdk/lib/nvmf/data/mmod_human_face_detector.dat") >> net; //存在问题 
+//     std::vector<dlib::mmod_rect> dets_temp = net(img);
+//     std::cout << "in CNN, Number of faces detected: " << dets_temp.size() << std::endl;
+// }
 
 void direct_process(uchar *read_ptr)
 {
@@ -209,7 +243,7 @@ int main(int argc, char *argv[])
     assert(fd > 0 && g_buf);
     int cnt = read(fd, g_buf, 3 * 1024 * 1024);
     direct_process(g_buf);
-
+    //cnn_process(g_buf);
     return 0;
 #endif
     cv::Mat frame = cv::imread(argv[1]); // TODO:IO时延统计
