@@ -345,15 +345,11 @@ COMPILE_CXX=\
 #不能随便自定义一个变量在cc.mk里面，要使用标准的nvcc对应的编译变量，如NVCCFLAGS
 NVCC = nvcc
 
-#有效的方式，但是不应该在这里面加存在问题
-#ifeq ($(CONFIG_NDP), y) 
-#LIBS += -lspdk_ndp_env
-#endif
-
 COMPILE_CUDA=\
 	$(Q)echo "  NVCC $S/$@ $(NVCCFLAGS) "; \
 	$(NVCC) -o $@ $(NVCCFLAGS) -c $< && \
-	mv -f $*.d.tmp $*.d && touch -c $@ 
+	mv -f $*.d.tmp $*.d && touch -c $@ #不要使用-dc
+
 
 ENV_LDFLAGS = $(if $(SPDK_NO_LINK_ENV),,$(ENV_LINKER_ARGS))
 
@@ -363,9 +359,17 @@ LINK_C=\
 	$(CC) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS)
 
 LINK_CXX=\
-	$(Q)echo "  LINK C++ $(notdir $@) $(LIBS) $(OBJS) $(LDFLAGS) ENV_LD:$(ENV_LDFLAGS)"; \
-	$(CXX) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS) -L/usr/local/cuda-11.5/lib64 -lcudart \
-	-I /home/femu/spdk/lib/nvmf/dlib /home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp -lpthread -lX11 `pkg-config opencv4  --libs` 
+	$(Q)echo "  LINK C++ $(notdir $@) $(LIBS) $(OBJS) $(LDFLAGS)"; \
+	$(CXX) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS) $(EXTRA_FLAGS)\
+	 `pkg-config opencv4 --libs` -ldlib  -L/usr/local/cuda-11.5/lib64 -lcudart -lX11 -lcudnn -lpthread \
+	 -lcuda -lcudart -lcublas -lcurand -lcusolver 
+
+#	-I /home/femu/spdk/lib/nvmf/dlib /home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp
+
+#	-L/usr/local/cuda-11.5/lib64 -lcudart \
+    -I /home/femu/spdk/lib/nvmf/dlib /home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp -lpthread -lX11 `pkg-config opencv4  --libs`
+
+# -Wl,-rpath,/usr/local/cuda-11.5/lib64 /home/femu/spdk/lib/nvmf/dlib/build/dlib/libdlib.a /usr/local/cuda-11.5/lib64/libcudart_static.a -lpthread -ldl -lrt  -lX11 /usr/local/cuda-11.5/lib64/libcublas.so /usr/local/cuda-11.5/lib64/libcudnn.so /usr/local/cuda-11.5/lib64/libcurand.so /usr/local/cuda-11.5/lib64/libcusolver.so /usr/local/cuda-11.5/lib64/libcudart.so -pthread `pkg-config opencv4 --cflags --libs` #-I /home/femu/spdk/lib/nvmf/dlib /home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp
 
 #$(NVCC) -o $@ $(CPPFLAGS) $(OBJS) \
 	-lspdk_bdev_passthru -lspdk_bdev_error -lspdk_bdev_gpt -lspdk_bdev_split -lspdk_bdev_raid -lspdk_bdev_lvol -lspdk_blobfs_bdev -lspdk_blobfs -lspdk_blob_bdev -lspdk_lvol -lspdk_blob -lspdk_bdev_aio -lspdk_conf -lspdk_event_nbd -lspdk_nbd -lspdk_event_vhost -lspdk_vhost -lspdk_event_scheduler -lspdk_event -lspdk_event_scsi -lspdk_scsi -lspdk_event_bdev -lspdk_bdev -lspdk_notify -lspdk_event_accel -lspdk_accel -lspdk_event_vmd -lspdk_vmd -lspdk_event_sock -lspdk_init -lspdk_thread -lspdk_trace -lspdk_sock -lspdk_env_dpdk_rpc -lspdk_rpc -lspdk_jsonrpc -lspdk_json -lspdk_util -lspdk_log -L/usr/local/cuda-11.5/lib64 -lcudart -I /home/femu/spdk/lib/nvmf/dlib /home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp -lpthread -lX11 `pkg-config opencv4  --libs` #--fuse-ld=bdf
@@ -490,7 +494,7 @@ UNINSTALL_HEADER=\
 %.o: %.cpp %.d $(MAKEFILE_LIST)
 	$(COMPILE_CXX)
 
-%.o: %.cu $(MAKEFILE_LIST)
+%.o: %.cu %.d $(MAKEFILE_LIST)
 	$(COMPILE_CUDA)
 
 %.d: ;

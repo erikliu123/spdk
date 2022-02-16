@@ -49,4 +49,19 @@ ifeq ($(OS),Linux)
 SPDK_LIB_LIST += event_nbd
 endif
 
+ifeq ($(CONFIG_NDP), y)
+#EXTRA_FLAGS = -L/usr/local/cuda-11.5/lib64 -lcudart -lpthread -lX11 -I /home/femu/spdk/lib/nvmf/dlib \
+	/home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp `pkg-config opencv4 --libs`  #-Wl,-rpath,/usr/local/cuda-11.5/lib64 \
+	 -ldl -lrt -lpthread -ldl -lrt  -lX11 \
+	/usr/local/cuda-11.5/lib64/libcublas.so /usr/local/cuda-11.5/lib64/libcudnn.so \
+	/usr/local/cuda-11.5/lib64/libcurand.so /usr/local/cuda-11.5/lib64/libcusolver.so \
+	/usr/local/cuda-11.5/lib64/libcudart.so /usr/local/cuda-11.5/lib64/libcudart.so -pthread \
+	
+
+#/home/femu/spdk/lib/nvmf/dlib/build/dlib/libdlib.a
+#-rdc=true
+
+#LDFLAGS += -Wl,-rpath,/usr/local/cuda-11.5/lib64 /home/femu/spdk/lib/nvmf/dlib/build/dlib/libdlib.a  -lpthread -ldl -lrt  -lX11 /usr/local/cuda-11.5/lib64/libcublas.so /usr/local/cuda-11.5/lib64/libcudnn.so /usr/local/cuda-11.5/lib64/libcurand.so /usr/local/cuda-11.5/lib64/libcusolver.so /usr/local/cuda-11.5/lib64/libcudart.so -pthread `pkg-config opencv4 --cflags --libs`  -I ../dlib/  -L/usr/local/cuda-11.5/lib64 -lcudart -I /home/femu/spdk/lib/nvmf/dlib /home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp 
+endif
+
 include $(SPDK_ROOT_DIR)/mk/spdk.app.mk
