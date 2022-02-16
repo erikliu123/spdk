@@ -45,7 +45,7 @@ C_SRCS-$(CONFIG_RDMA) += rdma.c
 LIBNAME = nvmf
 LOCAL_SYS_LIBS =
 
-CUDA_SRCS = file_info.cu ndp.cu ndp_cv.cu 
+CUDA_SRCS = file_info.cu ndp2.cu ndp_cv.cu
 #DIRS-$(CONFIG_NDP) += ndp #当前有问题，子目录肯定是更好的方式
 
 ifeq ($(CONFIG_RDMA),y)
@@ -84,9 +84,10 @@ endif
 
 ifeq ($(CONFIG_NDP), y)
 #LIBS += -lspdk_ndp_env
-NVCCFLAGS += -Indp -g  `pkg-config opencv4 --cflags` -MMD -MF $*.d.tmp
+CXXFLAGS =  -g -I../../include  -Indp -I dlib `pkg-config opencv4 --cflags` #-DDLIB_USE_CUDA #dlib/dlib/all/source.cpp  #-rdynamic不影响 -DDLIB_NO_GUI_SUPPORT 
+NVCCFLAGS += -g -I../../include -Indp -Idlib `pkg-config opencv4 --cflags` -MMD -MF $*.d.tmp -DDLIB_USE_CUDA
 #单独编译图像处理文件
-LDFLAGS += -L/usr/local/cuda-11.5/lib64 -lcudart -Idlib dlib/dlib/all/source.cpp -lpthread -lX11 `pkg-config opencv4  --libs` 
+#LDFLAGS += -L/usr/local/cuda-11.5/lib64 -lcudart -Idlib dlib/dlib/all/source.cpp -lpthread -lX11 `pkg-config opencv4  --libs` #-Wl,-rpath,/usr/local/cuda-11.5/lib64 ../dlib/build/dlib/libdlib.a /usr/local/cuda-11.5/lib64/libcudart_static.a -lpthread -ldl -lrt -lpthread -ldl -lrt -lX11 /usr/local/cuda-11.5/lib64/libcublas.so /usr/local/cuda-11.5/lib64/libcudnn.so /usr/local/cuda-11.5/lib64/libcurand.so /usr/local/cuda-11.5/lib64/libcusolver.so /usr/local/cuda-11.5/lib64/libcudart.so -pthread `pkg-config opencv4 --cflags --libs`  
 endif
 
 all: $(DIRS-y)

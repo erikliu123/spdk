@@ -18,12 +18,12 @@
 std::map<std::string, std::pair<int64_t, std::vector<file_extent>>> file_lbas_map;//文件名和对应的文件大小、lba数组
 static const unsigned int sector_bytes = 512; // FIXME someday
 
-
+int walk_fibmap (int fd, struct stat *st, unsigned int blksize, unsigned int sectors_per_block, __u64 start_lba, std::vector<file_extent> &result);
 int walk_fibmap (int fd, struct stat *st, unsigned int blksize, unsigned int sectors_per_block, __u64 start_lba, std::vector<file_extent> &result)//struct file_extent *result)
 {
 	struct file_extent ext;
 	__u64 num_blocks;
-	__u64 blk_idx, hole = ~0ULL;
+	__u64 blk_idx;//hole = ~0ULL;
 
 	/*
 	 * How many calls to FIBMAP do we need?
@@ -44,7 +44,7 @@ int walk_fibmap (int fd, struct stat *st, unsigned int blksize, unsigned int sec
 	 * that has a size and has no allocated blocks, we could flag it as a "tail-packed"
 	 * file if we cared: data is packed into the tail space of the inode block.
 	 */
-	int extent_num=0;
+	//int extent_num=0;
     __u64 last_block = -4;
 	for (blk_idx = 0; blk_idx < num_blocks; blk_idx++) {
 		unsigned int blknum = blk_idx;

@@ -3823,6 +3823,8 @@ nvmf_ctrlr_process_io_cmd(struct spdk_nvmf_request *req)
 	switch (cmd->opc) {
 	case SPDK_NVME_OPC_NDP:
 		return nvmf_ndp_execute_cmd(bdev, desc, ch, req);
+	case SPDK_NVME_OPC_NDP_WRITE:
+		return nvmf_ndp_write_execute_cmd(bdev, desc, ch, req);
 	case SPDK_NVME_OPC_READ:
 		return nvmf_bdev_ctrlr_read_cmd(bdev, desc, ch, req);
 	case SPDK_NVME_OPC_WRITE:

@@ -369,6 +369,8 @@ int nvmf_ndp_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 
 int nvmf_ndp_execute_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
              struct spdk_io_channel *ch, struct spdk_nvmf_request *req);
+int	nvmf_ndp_write_execute_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
+             struct spdk_io_channel *ch, struct spdk_nvmf_request *req);
 
 void nvmf_bdev_ctrlr_identify_ns(struct spdk_nvmf_ns *ns, struct spdk_nvme_ns_data *nsdata,
 				 bool dif_insert_or_strip);

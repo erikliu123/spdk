@@ -332,35 +332,88 @@ nvmf_bdev_zcopy_enabled(struct spdk_bdev *bdev)
 	return spdk_bdev_io_type_supported(bdev, SPDK_BDEV_IO_TYPE_ZCOPY);
 }
 
-
 int
 nvmf_ndp_execute_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 			 struct spdk_io_channel *ch, struct spdk_nvmf_request *req)
 {
 	struct spdk_nvme_cpl *response = &req->rsp->nvme_cpl;      
-	struct ndp_request *ndp_req = malloc(sizeof(ndp_req));
+	struct ndp_request *ndp_req = malloc(sizeof(struct ndp_request));
+	struct spdk_nvme_cmd *cmd = &req->cmd->nvme_cmd;
+	int ret;
+	int taskid = 0;
+	response->cdw0 = 0;
+    response->status.sc = SPDK_NVME_SC_INVALID_FILE;//SPDK_NVME_SC_INVALID_FILE;
+    response->status.sct = 0;
+
+	ndp_req->nvmf_req = req;
+	ndp_req->desc = desc;
+	ndp_req->io_ch = ch;
+
+	taskid = cmd->cdw13;//任务ID
+	ndp_req->accel = ((cmd->cdw14 & 0x1) != 0);
+
+	/*如果传过来了json文件，可以参考写命令读取这部分*/
+
+	//直接执行ndp任务
+	switch (taskid)
+	{
+	case FACE_DETECTION:
+	{
+		if((cmd->cdw14) & (1<<FEATURE_FLAG))
+			ndp_req->task.face_detection.face_feature_flag = true;
+		ret = process_image(ndp_req, "/mnt/ndp/test.bmp");
+		break;
+	}
+	case COMPRESS:
+
+		break;
+	case DECOMPRESS:
+		break;
+	default:
+		ret = 1;
+		break;
+	}
+	if(ret != 0)
+	{
+		spdk_nvmf_request_complete(req);
+		free(ndp_req);
+		return SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;//SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
+	}
+	
+	return SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
+}
+
+
+int
+nvmf_ndp_write_execute_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
+			 struct spdk_io_channel *ch, struct spdk_nvmf_request *req)
+{
+	struct spdk_nvme_cpl *response = &req->rsp->nvme_cpl;      
+	struct ndp_request *ndp_req = malloc(sizeof(struct ndp_request));
+	struct spdk_nvme_cmd *cmd = &req->cmd->nvme_cmd;
+	struct spdk_nvme_cpl *rsp = &req->rsp->nvme_cpl;
+	uint64_t start_lba;
+	uint64_t num_blocks;
 	int ret;
 
 	response->cdw0 = 0;
-    response->status.sc = SPDK_NVME_SC_INVALID_FILE;
+    response->status.sc = SPDK_NVME_SC_SUCCESS;//SPDK_NVME_SC_INVALID_FILE;
     response->status.sct = 0;
 
 	ndp_req->nvmf_req = req;
 	ndp_req->desc = desc;
 	ndp_req->io_ch = ch;
 	/*如果传过来了json文件，可以参考写命令读取这部分*/
+	nvmf_bdev_ctrlr_get_rw_params(cmd, &start_lba, &num_blocks);
 
-	//直接执行ndp任务
-	ret = process_image(ndp_req, "/mnt/ndp/test.bmp");
-	if(ret != 0)
-	{
-		spdk_nvmf_request_complete(req);
-		free(ndp_req);
-		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
-	}
+	
+	SPDK_NOTICELOG("start lba: %ld, num blocks: %ld, sgl length %d\n", num_blocks, start_lba, req->length);
+	SPDK_NOTICELOG("io vector count: %u, data: %x\n", req->iovcnt, ((int *)(req->iov[0].iov_base))[0]);
+	spdk_nvmf_request_complete(req);
+	free(ndp_req);
+	
 	return SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
 }
-
 
 int
 nvmf_ndp_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
@@ -372,7 +425,7 @@ nvmf_ndp_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 	struct spdk_nvme_cpl *rsp = &req->rsp->nvme_cpl;
 	uint64_t start_lba;
 	uint64_t num_blocks;
-	struct ndp_request *ndp_req = malloc(sizeof(ndp_req));
+	struct ndp_request *ndp_req = malloc(sizeof(struct ndp_request));
 	int rc;
 	ndp_req->nvmf_req = req;
 	ndp_req->total_bdev_blocks = 2 * 8;
@@ -468,6 +521,13 @@ nvmf_bdev_ctrlr_read_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 	// 	printf("[%ld] ", req->iov[i].iov_len);
 	// }
 	SPDK_NOTICELOG("\n");
+#if 0	//不可以直接返回，会有BUG
+//nvmf_tgt: tcp.c:365: nvmf_tcp_req_pdu_init: Assertion `tcp_req->pdu_in_use == false' failed.
+	rsp->status.sct = SPDK_NVME_SCT_GENERIC;
+	rsp->status.sc = SPDK_NVME_SC_SUCCESS;
+	spdk_nvmf_request_complete(req);
+	return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
+#endif
 
 	if (spdk_unlikely(num_blocks * block_size > req->length)) {
 		SPDK_ERRLOG("Read NLB %" PRIu64 " * block size %" PRIu32 " > SGL length %" PRIu32 "\n",
