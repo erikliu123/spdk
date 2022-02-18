@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <stdlib.h>
+#include <unistd.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
@@ -44,24 +45,31 @@ void detectFaceDlibMMOD(net_type mmodFaceDetector, Mat &frameDlibMmod)
     // Detect faces in the image
     std::vector<dlib::mmod_rect> faceRects = mmodFaceDetector(dlibMatrix);
     std::cout << "face number: " << faceRects.size() << std::endl;
-   
 }
 
 int main(int argc, const char **argv)
 {
+    int testTimes = 10;
     String mmodModelPath = "/home/femu/spdk/lib/nvmf/data/mmod_human_face_detector.dat";
     net_type mmodFaceDetector;
-    deserialize(mmodModelPath) >> mmodFaceDetector;
 
     Mat frame;
-    frame=imread("/mnt/ndp/test.bmp");
+    frame = imread("/mnt/ndp/test.bmp");
 
     double tt_dlibMmod = 0;
     double fpsDlibMmod = 0;
 
-    double t = cv::getTickCount();
-    detectFaceDlibMMOD(mmodFaceDetector, frame);
-    tt_dlibMmod = ((double)cv::getTickCount() - t) / cv::getTickFrequency();
-    fpsDlibMmod = 1 / tt_dlibMmod;
+   /*第一次时间最长，达到秒级别，后面只需要65毫秒左右*/
+    for (int i = 0; i < testTimes; i++)
+    {
+        double t = cv::getTickCount();
+        deserialize(mmodModelPath) >> mmodFaceDetector;
+        detectFaceDlibMMOD(mmodFaceDetector, frame);
+        tt_dlibMmod = ((double)cv::getTickCount() - t) / cv::getTickFrequency();
+        fpsDlibMmod = 1 / tt_dlibMmod;
+
+        std::cout << "computation time: " << tt_dlibMmod << std::endl;
+        dlib::sleep(1);
+    }
     return 0;
 }
