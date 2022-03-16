@@ -107,24 +107,7 @@ int produce_fsinfo(const char *path, int depth)
     int extent_num;
     int fd;
     
-    // if (fatherinode == 0 && depth == 0)
-    // {
-    //     file_lbas_map.clear();
-    //     if ((p = opendir(path)) == NULL)
-    //     {
-    //         printf("open directory in failure\n");
-    //         return -1;
-    //     }
-    //     entry = readdir(p);
-    //     while ((entry = readdir(p)) != NULL){
-    //         if (strcmp(entry->d_name, ".") == 0){
-    //             fatherinode = entry->d_ino;
-    //             break;
-    //         }
-    //     }
-    //     closedir(p);
-    //     strcpy(current_path, path);
-    // }
+    
     if ((p = opendir(path)) == NULL)
     {
         printf("open directory in failure\n");
@@ -140,10 +123,12 @@ int produce_fsinfo(const char *path, int depth)
             if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
                 continue;
             sprintf(child, "%s/%s", path, entry->d_name);
-            fd = open(child, O_RDONLY);
-            fstat(fd, &statbuf);
+            // fd = open(child, O_RDONLY);
+            // fstat(fd, &statbuf);
+            file_lbas_map[child] = std::make_pair(0, lba);//目录也要记录
             //filename, inode, LBAlist, fatherinode, version=1
             produce_fsinfo(child, depth + 1);
+            
         }
         //if(entry->d_type & ){
         else
