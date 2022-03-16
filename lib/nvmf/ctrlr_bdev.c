@@ -48,10 +48,14 @@
 #include "spdk/util.h"
 
 #include "spdk/log.h"
+//extern "C"{
 #include "ndp.h"
-
+//}
 extern  int ndp_decompress(const char *filename, uint8_t **result, int opt);
 extern	int process_image(struct ndp_request *ndp_req, char *input_name);
+extern int register_ndp_task(struct ndp_request *ndp_req);
+extern struct ndp_request *get_ndp_req_from_id(int id);
+extern int alloc_and_start_sub_req(struct ndp_request *ndp_req);
 
 static bool
 nvmf_subsystem_bdev_io_type_supported(struct spdk_nvmf_subsystem *subsystem,
@@ -130,7 +134,6 @@ nvmf_ndp_complete_cmd(struct spdk_bdev_io *bdev_io, bool success,
 	{
 		uint8_t *buffer = NULL;
 		SPDK_NOTICELOG("#######CUDA lib call#######\n");
-		//func();
 		process_image(ndp_req, "/home/femu/spdk/lib/nvmf/data/test.jpeg");
 		ret = ndp_decompress("liu", &buffer, 0);
 		if(!ret)
@@ -332,28 +335,201 @@ nvmf_bdev_zcopy_enabled(struct spdk_bdev *bdev)
 	return spdk_bdev_io_type_supported(bdev, SPDK_BDEV_IO_TYPE_ZCOPY);
 }
 
+#include "json.h"
+#include "json_object.h"
+//用户发送了一个json文件, 对齐进行解析
+/*
+{
+"Type": 0x0,  
+"FileList": {
+"FileRegex": false,			//文件名是否正则表达,只允许最后一个文件名可以正则表达。
+"ReadFile": [[FilePath], [FilePath], ……], //如果所有文件都不存在那么，
+"ReadDir": [[DirPath], [DirPath], ……],
+},
+"FaceDetection":
+{
+"AccelFlag": false,             // 十进制展示
+"FeatureFlag": false,
+},
+"TimeOut": 200000
+}
+
+*/
+// #define MAX_ITEM 1024
+// #define MAX_LEN 256
+// struct file_dir_alloc
+// {
+// 	char file_list[MAX_ITEM][MAX_LEN];//可以允许有正则表达式
+// 	char dir_list[MAX_ITEM][MAX_LEN];//可以允许正则表达式
+// 	bool alloc_file_flag[MAX_ITEM];
+// 	bool alloc_dir_flag[MAX_ITEM];
+// };
+// struct file_dir_alloc g_dir_list;
+#if 1
+int tran_parse_ndp_task_json(const char *json_str, struct ndp_request *ndp_req)
+{
+    struct json_object *jo_caps = NULL;
+    struct json_object *jo = NULL;
+	
+    int ret = SPDK_NVME_SC_INVALID_FILE;
+	
+	ndp_req->dir_flag = false;
+	
+    if ((jo_caps = json_tokener_parse(json_str)) == NULL) {
+        goto out;
+    }
+
+	if (json_object_object_get_ex(jo_caps, "TimeOut", &jo)) {//直接跳出来？
+        if (json_object_get_type(jo) != json_type_int) {
+            goto out;
+        }
+
+        errno = 0;
+        ndp_req->timeout_ms = json_object_get_int(jo);
+
+        if (errno != 0) {
+            goto out;
+        }
+    }
+
+	if (json_object_object_get_ex(jo_caps, "UserSpaceIOFlag", &jo)) {
+        if (json_object_get_type(jo) != json_type_boolean) {
+            goto out;
+        }
+        ndp_req->spdk_read_flag = json_object_get_boolean(jo);
+		SPDK_NOTICELOG("SPDK FLAG: %d\n", ndp_req->spdk_read_flag);
+    }
+
+    if (json_object_object_get_ex(jo_caps, "ID", &jo)) {
+        if (json_object_get_type(jo) != json_type_int) {
+            goto out;
+        }
+
+        errno = 0;
+        ndp_req->id = (int)json_object_get_int(jo);
+
+        if (errno != 0) {
+            goto out;
+        }
+    }
+
+    if (json_object_object_get_ex(jo_caps, "Type", &jo)) {
+        if (json_object_get_type(jo) != json_type_int) {
+            goto out;
+        }
+
+        errno = 0;
+        ndp_req->task_type = (int)json_object_get_int(jo);
+
+        if (errno != 0 ||  ndp_req->task_type >= MAX_NDP_TASK) {//有问题
+            goto out;
+        }
+    }
+	if (json_object_object_get_ex(jo_caps, "FaceDetection", &jo)) {
+		struct json_object *jo2 = NULL;
+		ndp_req->task.face_detection.cnn_flag = false;
+		ndp_req->task.face_detection.face_feature_flag = false;
+		if (json_object_get_type(jo) != json_type_object) {
+            goto out;
+        }
+		
+		if(json_object_object_get_ex(jo, "AccelerateFlag", &jo2)) {//为什么在这里退出?
+            //goto out;
+			;
+        }
+		// if (json_object_get_type(jo2) != json_type_boolean) {
+        //     goto out;
+        // }
+		ndp_req->accel = ndp_req->task.face_detection.cnn_flag = (json_object_get_int(jo2) == 1);//json_object_get_boolean(jo2);
+		
+
+		if (json_object_object_get_ex(jo, "FeatureFlag", &jo2)) {
+            //goto out;
+			;
+        }
+		// if (json_object_get_type(jo2) != json_type_boolean) {
+        //     goto out;
+        // }
+		ndp_req->task.face_detection.face_feature_flag = (json_object_get_int(jo2) == 1);//json_object_get_boolean(jo2);
+    }
+	
+
+    if (json_object_object_get_ex(jo_caps, "FileList", &jo)) {//假定当前只处理一个文件或者目录
+        struct json_object *jo2 = NULL;
+		if (json_object_get_type(jo) != json_type_object) {
+            goto out;
+        }
+        if (json_object_object_get_ex(jo, "ReadFile", &jo2)) {
+            if (json_object_get_type(jo2) != json_type_array) {
+                goto out;
+            }
+			
+			int ele_num = json_object_array_length(jo2);
+			printf("element number of file: %d\n", ele_num);
+			for(int i=0; i<ele_num; i++)//读取文件数组，默认1个
+			{
+				struct json_object *temp = json_object_array_get_idx(jo2, i);
+				const char *str = json_object_get_string(temp);
+				strcpy(ndp_req->read_path, str);
+				break;
+			}
+        }
+
+		 if (json_object_object_get_ex(jo, "ReadDirectory", &jo2)) {
+            if (json_object_get_type(jo2) != json_type_array) {
+                goto out;
+            }
+		
+			int ele_num = json_object_array_length(jo2);
+            //*pgsizep = (size_t)json_object_get_int64(jo2);
+			printf("element number of directory: %d\n", ele_num);
+			for(int i=0; i<ele_num; i++)//读取数组
+			{
+				struct json_object *temp = json_object_array_get_idx(jo2, i);
+				const char *str = json_object_get_string(temp);
+				ndp_req->dir_flag = true;
+				strcpy(ndp_req->read_path, str);
+				break;
+			}
+        }
+    }
+	
+	
+	
+    ret = 0;
+out:
+    /* We just need to put our top-level object. */
+    json_object_put(jo_caps);
+    return ret;
+}
+#endif
+
 int
 nvmf_ndp_execute_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 			 struct spdk_io_channel *ch, struct spdk_nvmf_request *req)
 {
 	struct spdk_nvme_cpl *response = &req->rsp->nvme_cpl;      
-	struct ndp_request *ndp_req = malloc(sizeof(struct ndp_request));
+	
 	struct spdk_nvme_cmd *cmd = &req->cmd->nvme_cmd;
 	int ret;
 	int taskid = 0;
 	response->cdw0 = 0;
-    response->status.sc = SPDK_NVME_SC_INVALID_FILE;//SPDK_NVME_SC_INVALID_FILE;
+    ret = SPDK_NVME_SC_INVALID_FILE;//SPDK_NVME_SC_INVALID_FILE;
     response->status.sct = 0;
 
-	ndp_req->nvmf_req = req;
-	ndp_req->desc = desc;
-	ndp_req->io_ch = ch;
-
 	taskid = cmd->cdw13;//任务ID
-	ndp_req->accel = ((cmd->cdw14 & 0x1) != 0);
+	struct ndp_request *ndp_req = get_ndp_req_from_id(taskid);
+	if(ndp_req)
+	{
+		ndp_req->nvmf_req = req;
+		ret = alloc_and_start_sub_req(ndp_req);
+	}
+	/* outdated way */
+	// ndp_req->accel = ((cmd->cdw14 & 0x1) != 0);
+	// ndp_req->spdk_read_flag =  ((cmd->cdw14 & 0x2) != 0);
 
 	/*如果传过来了json文件，可以参考写命令读取这部分*/
-
+	/*
 	//直接执行ndp任务
 	switch (taskid)
 	{
@@ -373,13 +549,16 @@ nvmf_ndp_execute_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 		ret = 1;
 		break;
 	}
-	if(ret != 0)
+	*/
+	response->status.sc = ret;
+	if(ret != 0 || !ndp_req->spdk_read_flag)//异常行为或者同步IO时，需要结束请求
 	{
 		spdk_nvmf_request_complete(req);
 		free(ndp_req);
 		return SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;//SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
 	}
 	
+
 	return SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
 }
 
@@ -400,18 +579,33 @@ nvmf_ndp_write_execute_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
     response->status.sc = SPDK_NVME_SC_SUCCESS;//SPDK_NVME_SC_INVALID_FILE;
     response->status.sct = 0;
 
-	ndp_req->nvmf_req = req;
+	// ndp_req->nvmf_req = req;
 	ndp_req->desc = desc;
 	ndp_req->io_ch = ch;
 	/*如果传过来了json文件，可以参考写命令读取这部分*/
+	//TODO 解析json字节流
 	nvmf_bdev_ctrlr_get_rw_params(cmd, &start_lba, &num_blocks);
+	if(req->iovcnt == 1)//保证传过来的json文件不超过4K大小！！
+	{
+		ret = tran_parse_ndp_task_json(req->iov[0].iov_base, ndp_req);
+	}else{
+		ret = SPDK_NVME_SC_INVALID_FILE;//错误码
+		SPDK_NOTICELOG("json file is too long, io vector number [%d]\n", req->iovcnt);
+		// spdk_nvmf_request_complete(req);
+		// free(ndp_req);
+		// return 0;
 
-	
+	}
+	if(ret == 0)
+	{
+		ret = register_ndp_task(ndp_req); //查看是否重复的ID
+		SPDK_NOTICELOG("register NDP task[%d] successfully\n", ndp_req->id);
+	}
+	response->status.sc = ret;
+	//记录任务ID及对应的具体任务内容，如果json文件有问题，那么收到0x82命令时候直接返回错误
 	SPDK_NOTICELOG("start lba: %ld, num blocks: %ld, sgl length %d\n", num_blocks, start_lba, req->length);
 	SPDK_NOTICELOG("io vector count: %u, data: %x\n", req->iovcnt, ((int *)(req->iov[0].iov_base))[0]);
 	spdk_nvmf_request_complete(req);
-	free(ndp_req);
-	
 	return SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
 }
 
@@ -425,7 +619,7 @@ nvmf_ndp_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 	struct spdk_nvme_cpl *rsp = &req->rsp->nvme_cpl;
 	uint64_t start_lba;
 	uint64_t num_blocks;
-	struct ndp_request *ndp_req = malloc(sizeof(struct ndp_request));
+	struct ndp_request *ndp_req = (struct ndp_request *)malloc(sizeof(struct ndp_request));
 	int rc;
 	ndp_req->nvmf_req = req;
 	ndp_req->total_bdev_blocks = 2 * 8;
@@ -513,6 +707,7 @@ nvmf_bdev_ctrlr_read_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 		rsp->status.sc = SPDK_NVME_SC_LBA_OUT_OF_RANGE;
 		return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
 	}
+#if 0	
 	SPDK_NOTICELOG("Read NLB[%ld], block size[%u], SGL length[%u] \n",  
 		num_blocks, block_size, req->length);
 	SPDK_NOTICELOG("io vector number [%d], io vec info:\n", req->iovcnt);
@@ -521,6 +716,7 @@ nvmf_bdev_ctrlr_read_cmd(struct spdk_bdev *bdev, struct spdk_bdev_desc *desc,
 	// 	printf("[%ld] ", req->iov[i].iov_len);
 	// }
 	SPDK_NOTICELOG("\n");
+#endif	
 #if 0	//不可以直接返回，会有BUG
 //nvmf_tgt: tcp.c:365: nvmf_tcp_req_pdu_init: Assertion `tcp_req->pdu_in_use == false' failed.
 	rsp->status.sct = SPDK_NVME_SCT_GENERIC;
