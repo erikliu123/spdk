@@ -45,8 +45,12 @@ C_SRCS-$(CONFIG_RDMA) += rdma.c
 LIBNAME = nvmf
 LOCAL_SYS_LIBS =
 
-CUDA_SRCS = file_info.cu ndp2.cu ndp_cv.cu
+CUDA_SRCS = file_info.cu ndp.cu ndp_cv.cu
 #DIRS-$(CONFIG_NDP) += ndp #当前有问题，子目录肯定是更好的方式
+
+CFLAGS += $(shell pkg-config --cflags json-c)
+LDFLAGS += $(shell pkg-config --libs json-c)
+
 
 ifeq ($(CONFIG_RDMA),y)
 LOCAL_SYS_LIBS += -libverbs -lrdmacm

@@ -1,0 +1,17 @@
+{
+    "ID": 1,
+    "Type": 0,  
+    "UserSpaceIOFlag": false,
+    "FaceDetection":{
+        "AccelerateFlag": 1,
+        "FeatureFlag": 1
+    },
+    "FileList":{
+        "FileRegex": false,			
+        "ReadFile": ["/mnt/ndp/test.bmp"], 
+        "ReadDirectory": []
+    },
+   
+    "TimeOut": 200000
+}
+

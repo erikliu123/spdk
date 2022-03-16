@@ -1,0 +1,17 @@
+{
+    "ID": 1,
+    "Type": 0,  
+    "UserSpaceIOFlag": true,
+    "FaceDetection":{
+        "AccelerateFlag": 1,
+        "FeatureFlag": 1
+    },
+    "FileList":{
+        "FileRegex": false,			
+        "ReadFile": [], 
+        "ReadDirectory": ["/mnt/ndp"]
+    },
+   
+    "TimeOut": 200000
+}
+
