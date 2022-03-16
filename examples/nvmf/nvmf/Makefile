@@ -40,4 +40,18 @@ APP := nvmf
 C_SRCS := nvmf.c
 SPDK_LIB_LIST = $(ALL_MODULES_LIST) event event_bdev nvmf
 
+DLIB = /home/femu/spdk/lib/nvmf/dlib
+ifeq ($(CONFIG_NDP), y)
+#LDFLAGS += -DDLIB_NO_GUI_SUPPORT -DDLIB_USE_CUDA -Wl,-rpath,/usr/local/cuda-11.5/lib64 -ldl -lrt -lpthread -ldl -lrt  -lX11 \
+	/usr/local/cuda-11.5/lib64/libcublas.so /usr/local/cuda-11.5/lib64/libcudnn.so \
+	/usr/local/cuda-11.5/lib64/libcurand.so /usr/local/cuda-11.5/lib64/libcusolver.so \
+	-pthread  -I$(DLIB) $(DLIB)/dlib/all/source.cpp \
+	-L/usr/local/cuda-11.5/lib64 -lcudart `pkg-config opencv4 --libs`
+
+#LDFLAGS += -L/usr/local/cuda-11.5/lib64 -lcudart \
+    -I /home/femu/spdk/lib/nvmf/dlib /home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp -lpthread -lX11 `pkg-config opencv4  --libs`
+endif
+
+#/usr/local/cuda-11.5/lib64/libcublas.so /usr/local/cuda-11.5/lib64/libcudnn.so /usr/local/cuda-11.5/lib64/libcurand.so /usr/local/cuda-11.5/lib64/libcusolver.so /usr/local/cuda-11.5/lib64/libcudart.so 
+
 include $(SPDK_ROOT_DIR)/mk/spdk.app.mk

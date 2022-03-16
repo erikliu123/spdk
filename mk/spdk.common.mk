@@ -362,8 +362,8 @@ LINK_CXX=\
 	$(Q)echo "  LINK C++ $(notdir $@) $(LIBS) $(OBJS) $(LDFLAGS)"; \
 	$(CXX) -o $@ $(CPPFLAGS) $(LDFLAGS) $(OBJS) $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS) $(EXTRA_FLAGS)\
 	 `pkg-config opencv4 --libs` -ldlib  -L/usr/local/cuda-11.5/lib64 -lcudart -lX11 -lcudnn -lpthread \
-	 -lcuda -lcudart -lcublas -lcurand -lcusolver 
-
+	 -lcuda -lcudart -lcublas -lcurand -lcusolver  `pkg-config --libs json-c`
+	
 #	-I /home/femu/spdk/lib/nvmf/dlib /home/femu/spdk/lib/nvmf/dlib/dlib/all/source.cpp
 
 #	-L/usr/local/cuda-11.5/lib64 -lcudart \
