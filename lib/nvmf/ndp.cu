@@ -37,8 +37,17 @@ extern "C"
 extern std::map<std::string, std::pair<int64_t, std::vector<file_extent>>> file_lbas_map;
 extern int produce_fsinfo(const char *path, int depth);
 
+/* 普通算子 */
 static void ndp_wordcount_complete(struct spdk_bdev_io *bdev_io, bool success,
                                    void *cb_arg);
+
+void decompress_simple(BlockDXT1 *dxt, Color32 *colors, int width);
+static int ndp_compute_compress(struct ndp_subrequest* sub_req);
+
+
+/* 加速算子 */
+__global__ void
+ndp_accelerate_decompress(BlockDXT1 *input, Color32 *output, int height, int width);
 
 cudaPreAlloc gAlloc;
 static int g_subid = 1;
@@ -58,11 +67,177 @@ void spdk_ndp_request_complete(struct ndp_subrequest *sub_req, int status)
     free(sub_req->read_ptr);
   if (ndp_req->num_finished_jobs == ndp_req->num_jobs && ndp_req->spdk_read_flag)//异步方式
   {
+    ndp_req->end_time = spdk_get_ticks();//ndp_req->start_time= spdk_get_ticks(); 
+      SPDK_INFOLOG(ndp, "total task excution time [%lu], IO time[%lu]\n", (ndp_req->end_time - ndp_req->start_time)/3500, ndp_req->total_io_time);
     spdk_nvmf_request_complete(ndp_req->nvmf_req);
-    // TODO:打印信息？
+    for(auto x:search_table[ndp_req->id])
+    {
+      free(x);
+    }
     free(ndp_req);
   }
 }
+
+int ndp_compute_decompress(struct ndp_subrequest *sub_req)
+{
+    struct ndp_request *ndp_req = sub_req->req;
+    struct spdk_nvmf_request *req = ndp_req->nvmf_req;
+    struct spdk_nvme_cpl *response = &req->rsp->nvme_cpl;//可能会因为超时被释放掉
+    bool cnn_flag = false;
+    int sc = 0, sct = 0;
+    int ret = 0;
+    uint32_t cdw0 = 0;
+    unsigned char *compressImageBuffer = (unsigned char *)sub_req->read_ptr + sizeof(DDSHeader);
+   
+    void* h_result = NULL;
+    // Color32 palette[4];
+    // //获取当前block应该处理的图像区域
+    // const int bid = blockIdx.x + blockIdx.y * gridDim.x;
+    // const int tid = bid * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+    DDSHeader header;
+    // header.notused = 0;
+    memcpy(&header, sub_req->read_ptr, sizeof(DDSHeader));
+    uint w = header.width, h = header.height;
+    uint W = w, H = h;
+     sub_req->result_ptr = (unsigned char *)malloc(8*header.pitch);
+     h_result = sub_req->result_ptr;
+    if(!ndp_req->accel){//不加速
+      for (uint y = 0; y < h; y += 4)
+      {
+        for (uint x = 0; x < w; x += 4)
+        {
+          uint referenceBlockIdx = ((y / 4) * (W / 4) + (x / 4));
+          uint resultBeginIdx = y * W + x;
+          BlockDXT1 *tmp = ((BlockDXT1 *)compressImageBuffer) + referenceBlockIdx;
+          Color32 *tmpColor = ((Color32 *)sub_req->result_ptr) + resultBeginIdx;
+          decompress_simple(tmp, tmpColor, W);
+        }
+      }
+    }
+    else
+    {
+       //使用CUDA进行加速
+      int BlockSize = 16;
+      //图片的长宽都是4的倍数
+      int GridSize = (header.width / 4 * header.height / 4 + (BlockSize * BlockSize - 1)) / (BlockSize * BlockSize);
+      dim3 threadPerBlock(BlockSize, BlockSize);
+      dim3 numBlocks(GridSize, 1);
+      uint64_t cuda_start_ticks = 0, cuda_memcpy_ticks = 0, cuda_end_ticks = 0,
+             cuda_host_ticks = 0;
+      uint64_t ticks_per_second = spdk_get_ticks_hz();;
+      uint64_t temp_start_ticks, temp_end_ticks;
+
+      temp_start_ticks = spdk_get_ticks();
+      cudaMemcpy(gAlloc.decompressTask.inputImage[sub_req->sub_id], compressImageBuffer, header.pitch, cudaMemcpyHostToDevice);
+
+      cuda_memcpy_ticks = spdk_get_ticks();
+      if ((1000 * (cuda_memcpy_ticks - temp_start_ticks) / ticks_per_second) > 1)
+      {
+        SPDK_INFOLOG(ndp, "!!! NDP's memcpy time too high... %ld (us)\n", 1000000 * (cuda_memcpy_ticks - temp_start_ticks) / ticks_per_second);
+      }
+      ndp_accelerate_decompress<<<numBlocks, threadPerBlock>>>(gAlloc.decompressTask.inputImage[sub_req->sub_id], gAlloc.decompressTask.decompressResult[sub_req->sub_id], H, W);
+      checkCudaErrors(cudaDeviceSynchronize());
+
+      temp_end_ticks = spdk_get_ticks();
+      cudaMemcpy(h_result, gAlloc.decompressTask.decompressResult[sub_req->sub_id], w * h * 4, cudaMemcpyDeviceToHost);
+      if ((1000 * 1000 * (temp_end_ticks - cuda_memcpy_ticks) / ticks_per_second) > 50)
+      {
+        SPDK_INFOLOG(ndp, "!!! NDP's kernel time too high... %ld (us)\n",  1000000 * (temp_end_ticks - cuda_memcpy_ticks) / ticks_per_second);
+      }
+    }
+
+    sub_req->end_compute_time = spdk_get_ticks(); //计算结束时间
+    //打印时间戳
+    SPDK_INFOLOG(ndp, "file[%s], exclude malloc, total time: %lu, SPDK malloc time: %lu , SPDK IO consume: %lu, computation time: %lu\n", sub_req->read_file, (sub_req->end_compute_time - sub_req->start_io_time)/3500,  (sub_req->start_io_time - sub_req->malloc_time)/3500, (sub_req->end_io_time - sub_req->start_io_time)/3500, (sub_req->end_compute_time - sub_req->end_io_time)/3500);
+    return 0;
+}        
+
+void ndp_compress_complete(struct spdk_bdev_io *bdev_io, bool success,
+                                        void *cb_arg)
+{
+    
+    struct ndp_subrequest *sub_req = (struct ndp_subrequest *)cb_arg;
+    struct ndp_request *ndp_req = sub_req->req;
+    struct spdk_nvmf_request *req = ndp_req->nvmf_req;
+
+    bool cnn_flag = false;
+    int sc = 0, sct = 0;
+    int ret = 0;
+    uint32_t cdw0 = 0;
+    bool face_feature_flag = ndp_req->task.face_detection.face_feature_flag;
+
+    cnn_flag = ndp_req->accel; //是否使用加速场景, cdw13
+    // spdk_log_set_flag("ndp");
+    spdk_bdev_io_get_nvme_status(bdev_io, &cdw0, &sct, &sc); //假设中途没有数据块读取错误
+    SPDK_INFOLOG(ndp, "cdw0=%d sct=%d, sc=%d\n", cdw0, sct, sc);
+
+    sub_req->read_bdev_blocks++;
+    spdk_bdev_free_io(bdev_io);
+    SPDK_INFOLOG(ndp, "continuous blk: %d, total read blocks:%d\n", sub_req->read_bdev_blocks, sub_req->total_bdev_blocks);
+    if (sub_req->read_bdev_blocks == sub_req->total_bdev_blocks)
+    {
+        //读取人脸
+        sub_req->end_io_time = spdk_get_ticks();
+        ndp_req->total_io_time += (sub_req->end_io_time - sub_req->start_io_time)/3500;
+        ret = ndp_compute_compress(sub_req);
+        spdk_ndp_request_complete(sub_req, ret);
+    }
+}
+
+void ndp_decompress_complete(struct spdk_bdev_io *bdev_io, bool success,
+                                        void *cb_arg)
+{
+    
+    struct ndp_subrequest *sub_req = (struct ndp_subrequest *)cb_arg;
+    struct ndp_request *ndp_req = sub_req->req;
+    struct spdk_nvmf_request *req = ndp_req->nvmf_req;
+    struct spdk_nvme_cpl *response = &req->rsp->nvme_cpl;//可能会因为超时被释放掉
+    bool cnn_flag = false;
+    int sc = 0, sct = 0;
+    int ret = 0;
+    uint32_t cdw0 = 0;
+    spdk_bdev_io_get_nvme_status(bdev_io, &cdw0, &sct, &sc); //假设中途没有数据块读取错误
+    SPDK_INFOLOG(ndp, "cdw0=%d sct=%d, sc=%d\n", cdw0, sct, sc);
+    //统计读取的数据是否完成，完成才完成请求
+    sub_req->read_bdev_blocks++;
+    spdk_bdev_free_io(bdev_io);
+    SPDK_INFOLOG(ndp, "continuous blk: %d, total read blocks:%d\n", sub_req->read_bdev_blocks, sub_req->total_bdev_blocks);
+    if (sub_req->read_bdev_blocks == sub_req->total_bdev_blocks)
+    {
+        //读取人脸
+        sub_req->end_io_time = spdk_get_ticks();
+        ndp_req->total_io_time += (sub_req->end_io_time - sub_req->start_io_time)/3500;
+        ret = ndp_compute_decompress(sub_req);
+        spdk_ndp_request_complete(sub_req, ret);
+    }
+}
+
+
+
+static int ndp_compute_compress(struct ndp_subrequest* sub_req)
+{
+    struct ndp_request *ndp_req = sub_req->req;
+    struct spdk_nvmf_request *req = ndp_req->nvmf_req;
+    struct spdk_nvme_cpl *response = &req->rsp->nvme_cpl;//可能会因为超时被释放掉
+    bool cnn_flag = false;
+    int sc = 0, sct = 0;
+    int ret = 0;
+    uint32_t cdw0 = 0;
+    unsigned char *compressImageBuffer = (unsigned char *)sub_req->read_ptr + sizeof(DDSHeader);
+   
+    DDSHeader header;
+    memcpy(&header, sub_req->read_ptr, sizeof(DDSHeader));
+    uint w = header.width, h = header.height;
+    uint W = w, H = h;
+    //读取bmp文件的
+    //TODO
+
+    sub_req->end_compute_time = spdk_get_ticks(); //计算结束时间
+    //打印时间戳
+    SPDK_INFOLOG(ndp, "file[%s], exclude malloc, total time: %lu, SPDK malloc time: %lu , SPDK IO consume: %lu, computation time: %lu\n", sub_req->read_file, (sub_req->end_compute_time - sub_req->start_io_time)/3500,  (sub_req->start_io_time - sub_req->malloc_time)/3500, (sub_req->end_io_time - sub_req->start_io_time)/3500, (sub_req->end_compute_time - sub_req->end_io_time)/3500);
+    
+    return 0;
+}        
 
 
 extern "C" {
@@ -91,8 +266,10 @@ int alloc_and_start_sub_req(struct ndp_request *ndp_req)
 {
   int len = strlen(ndp_req->read_path);
   int ret = 0;
+  int subID = 0;
   std::pair<int64_t, std::vector<file_extent>> lba;
   ndp_req->num_finished_jobs = ndp_req->num_jobs = 0;
+  ndp_req->total_io_time = 0;
   
   if (ndp_req->reverse)
   { // TODO
@@ -104,7 +281,7 @@ int alloc_and_start_sub_req(struct ndp_request *ndp_req)
     //(ndp_req, input_name, ndp_face_detection_complete);
     switch (ndp_req->task_type)
     {
-    case FACE_DETECTION:
+    case FACE_DETECTION: case COMPRESS://主要是对*bmp文件操作
       //查找所有的bmp文件
       {
         std::map<std::string, std::pair<int64_t, std::vector<file_extent>>>::iterator it = file_lbas_map.lower_bound(ndp_req->read_path);
@@ -121,15 +298,37 @@ int alloc_and_start_sub_req(struct ndp_request *ndp_req)
             strcpy(sub_req->read_file, it->first.c_str());
             sub_req->req = ndp_req;
             sub_req->read_ptr = NULL;
+            sub_req->sub_id = subID++;
             //红黑树和链表管理。。。
             search_table[ndp_req->id].push_back(sub_req);
           }
           it++;
         }
       }
-
       break;
-    case COMPRESS:
+    case DECOMPRESS:
+      //查找所有的bmp文件
+      {
+        std::map<std::string, std::pair<int64_t, std::vector<file_extent>>>::iterator it = file_lbas_map.lower_bound(ndp_req->read_path);
+        while (it != file_lbas_map.end() && strncmp(it->first.c_str(), ndp_req->read_path, len) == 0)
+        {
+          int sublen = it->first.size();
+          if (it->second.first > 0 && it->first.substr(sublen - 4) == ".dds")//最后三个字符
+          {
+            ndp_req->num_jobs++;
+            std::cout << it->first << std::endl;
+            //生成子请求并记录
+            struct ndp_subrequest *sub_req = (struct ndp_subrequest *)malloc(sizeof(struct ndp_subrequest));
+            strcpy(sub_req->read_file, it->first.c_str());
+            sub_req->req = ndp_req;
+            sub_req->read_ptr = NULL;
+            sub_req->sub_id = subID++;
+            //红黑树和链表管理。。。
+            search_table[ndp_req->id].push_back(sub_req);
+          }
+          it++;
+        }
+      }
       break;
     default:
       break;
@@ -148,6 +347,8 @@ int alloc_and_start_sub_req(struct ndp_request *ndp_req)
     }
     //不需要子任务
   }
+  /* 任务正式开始 */
+  ndp_req->start_time= spdk_get_ticks(); 
 
   //之前的文件合法性已经检查完毕，不考虑极端情况下文件系统同时被篡改。。
   for (auto sub_req : search_table[ndp_req->id])
@@ -160,22 +361,45 @@ int alloc_and_start_sub_req(struct ndp_request *ndp_req)
 
       if (!ret && !ndp_req->spdk_read_flag)
       {
-        printf("direct IO ...\n");
+        //printf("direct IO ...\n");
         ret = ndp_compute_face_detection(sub_req);
       }
     }
     break;
     
+    case COMPRESS:
+    {
+      ret = ndp_read_file(sub_req, sub_req->read_file, ndp_compress_complete, sub_req);
+
+      if (!ret && !ndp_req->spdk_read_flag)
+      {
+        ret = ndp_compute_compress(sub_req);
+      }
+    }
+    break;
+     case DECOMPRESS:
+    {
+      ret = ndp_read_file(sub_req, sub_req->read_file, ndp_decompress_complete, sub_req);
+
+      if (!ret && !ndp_req->spdk_read_flag)
+      {
+        ret = ndp_compute_decompress(sub_req);
+      }
+    }
+    break;
+
     default:
       return -1;
       break;
     }
   }
-  // if (!ndp_req->spdk_read_flag)
-  // {
-  //   spdk_nvmf_request_complete(ndp_req->nvmf_req);
-  //   free(ndp_req);
-  // }
+  if (!ndp_req->spdk_read_flag)
+  {
+    ndp_req->end_time = spdk_get_ticks();//ndp_req->start_time= spdk_get_ticks(); 
+    SPDK_INFOLOG(ndp, "total task excution time [%lu], IO time[%lu]\n", (ndp_req->end_time - ndp_req->start_time)/3500, ndp_req->total_io_time);
+    // spdk_nvmf_request_complete(ndp_req->nvmf_req);
+    // free(ndp_req);
+  }
   return 0;
 }
 
@@ -227,9 +451,7 @@ int ndp_read_file(struct ndp_subrequest *sub_req, char *input_name, void (*callb
   else //同步IO
   {
     int fd, cnt;
-    fd = open(input_name, O_DIRECT | O_RDONLY);
-    if (fd < 0)
-      return -ENOENT;
+   
     int blk_size = getpagesize();
     int readlen = (lba.first + blk_size - 1) / blk_size * blk_size;
     unsigned char *tempbuf;
@@ -238,8 +460,13 @@ int ndp_read_file(struct ndp_subrequest *sub_req, char *input_name, void (*callb
     sub_req->read_ptr = tempbuf;
 
     sub_req->start_io_time = spdk_get_ticks();
+    fd = open(input_name, O_DIRECT | O_RDONLY);
+    if (fd < 0)
+      return -ENOENT;
     cnt = read(fd, tempbuf, readlen);
+    close(fd);
     sub_req->end_io_time = spdk_get_ticks();
+    ndp_req->total_io_time += (sub_req->end_io_time - sub_req->start_io_time)/3500;
     assert(cnt > 0);
     //callback_fn(ndp_req->arg);
     // SPDK_INFOLOG(ndp, "malloc time: %.2f us, diret IO time: %.2f us.\n", 1000000.0 * (ndp_req->start_io_time - ndp_req->malloc_time) / spdk_get_ticks_hz(), 1000000.0 * (spdk_get_ticks() - ndp_req->start_io_time) / spdk_get_ticks_hz());
@@ -363,13 +590,21 @@ extern "C"
   int ndp_init(void)
   {
     produce_fsinfo(DEFAULT_NDP_DIR, 0); //加载系统的文件信息
-    checkCudaErrors(cudaMalloc((void **)&(gAlloc.compressTask.inputImage), MAX_COMPRESS_SIZE));
+    //checkCudaErrors(cudaMalloc((void **)&(gAlloc.decompressTask.inputImage), MAX_COMPRESS_SIZE));
 #ifdef ZERO_COPY
     checkCudaErrors(cudaSetDeviceFlags(cudaDeviceMapHost));
-    checkCudaErrors(cudaHostAlloc((void **)&(gAlloc.compressTask.decompressResult), MAX_COMPRESS_SIZE * 8, cudaHostAllocWriteCombined | cudaHostAllocMapped));
-    checkCudaErrors(cudaHostGetDevicePointer((void **)&gAlloc.compressTask.devHostDataToDevice, gAlloc.compressTask.decompressResult, 0));
+    checkCudaErrors(cudaHostAlloc((void **)&(gAlloc.compressTask.decompressResult[0]), MAX_COMPRESS_SIZE * 8, cudaHostAllocWriteCombined | cudaHostAllocMapped));
+    checkCudaErrors(cudaHostGetDevicePointer((void **)&gAlloc.compressTask.devHostDataToDevice, gAlloc.compressTask.decompressResult[0], 0));
 #else
-    checkCudaErrors(cudaMalloc((void **)&(gAlloc.compressTask.decompressResult), MAX_COMPRESS_SIZE * 8));
+   
+    for(int i = 0; i<MAX_CUDA_PICTURES; i++)
+    {
+      checkCudaErrors(cudaMalloc((void **)&(gAlloc.compressTask.inputImage[i]), 8 * MAX_COMPRESS_SIZE));
+      checkCudaErrors(cudaMalloc((void **)&(gAlloc.compressTask.compressResult[i]), MAX_COMPRESS_SIZE));
+
+      checkCudaErrors(cudaMalloc((void **)&(gAlloc.decompressTask.inputImage[i]),  MAX_COMPRESS_SIZE));
+      checkCudaErrors(cudaMalloc((void **)&(gAlloc.decompressTask.decompressResult[i]), 8 * MAX_COMPRESS_SIZE));
+    }
 #endif
     spdk_log_set_flag("ndp");
     return 0;
@@ -377,8 +612,13 @@ extern "C"
 
   int ndp_free(void)
   {
-    checkCudaErrors(cudaFree((void *)gAlloc.compressTask.inputImage));
-    checkCudaErrors(cudaFree((void *)gAlloc.compressTask.decompressResult));
+    for(int i = 0; i<MAX_CUDA_PICTURES; i++)
+    {
+      checkCudaErrors(cudaFree((void *)gAlloc.compressTask.inputImage[i]));
+      checkCudaErrors(cudaFree((void *)gAlloc.compressTask.compressResult[i]));
+       checkCudaErrors(cudaFree((void *)gAlloc.decompressTask.inputImage[i]));
+      checkCudaErrors(cudaFree((void *)gAlloc.decompressTask.decompressResult[i]));
+    }
     return 0;
   }
 
@@ -413,7 +653,7 @@ extern "C"
     return 0;
   }
   //时间框架
-  int ndp_decompress(const char *filename, uint8_t **result, int opt) //选不选择NDP加速
+  int ndp_decompress(struct ndp_subrequest *sub_req,const char *filename, uint8_t **result) //选不选择NDP加速
   {
     // Gflops/s
     //统计NDP计算时间
@@ -421,6 +661,7 @@ extern "C"
     spdk_log_set_flag("ndp");
     ticks_per_second = spdk_get_ticks_hz();
     start_ticks = spdk_get_ticks();
+    int opt = sub_req->req->accel;
 
     if (!filename || !result)
       return -ENOENT;
@@ -445,7 +686,8 @@ extern "C"
     fread(&header, sizeof(DDSHeader), 1, fp);
     uint w = header.width, h = header.height;
     uint W = w, H = h;
-
+    BlockDXT1 *device_ptr = (BlockDXT1 *)gAlloc.decompressTask.inputImage[0];
+    Color32 *device_result_ptr = (Color32 *)gAlloc.decompressTask.decompressResult[0];
     //根据header.pitch读取文件大小
     compressImageBuffer = (uint8_t *)malloc(header.pitch);
 
@@ -464,7 +706,7 @@ extern "C"
     fclose(fp);
     uint64_t cuda_start_ticks = 0, cuda_memcpy_ticks = 0, cuda_end_ticks = 0,
              cuda_host_ticks = 0;
-    //解压缩操作
+    //普通解压缩操作
     if (opt == 0)
     {
       cuda_memcpy_ticks = spdk_get_ticks();
@@ -495,17 +737,17 @@ extern "C"
       for (int k = 0; k < 10; k++)
       {
         temp_start_ticks = spdk_get_ticks();
-        cudaMemcpy(gAlloc.compressTask.inputImage, compressImageBuffer, header.pitch, cudaMemcpyHostToDevice);
+        cudaMemcpy(device_ptr, compressImageBuffer, header.pitch, cudaMemcpyHostToDevice);
         cuda_memcpy_ticks = spdk_get_ticks();
         if ((1000 * (cuda_memcpy_ticks - temp_start_ticks) / ticks_per_second) > 1)
         {
           SPDK_INFOLOG(ndp, "[%d] NDP's memcpy time too high... %ld (us)\n", k, 1000000 * (cuda_memcpy_ticks - temp_start_ticks) / ticks_per_second);
         }
-        ndp_accelerate_decompress<<<numBlocks, threadPerBlock>>>(gAlloc.compressTask.inputImage, gAlloc.compressTask.decompressResult, H, W);
+        ndp_accelerate_decompress<<<numBlocks, threadPerBlock>>>(device_ptr, device_result_ptr, H, W);
         checkCudaErrors(cudaDeviceSynchronize());
 
         temp_end_ticks = spdk_get_ticks();
-        cudaMemcpy(h_result, gAlloc.compressTask.decompressResult, w * h * 4, cudaMemcpyDeviceToHost);
+        cudaMemcpy(h_result, device_result_ptr, w * h * 4, cudaMemcpyDeviceToHost);
         if ((1000 * 1000 * (temp_end_ticks - cuda_memcpy_ticks) / ticks_per_second) > 50)
         {
           SPDK_INFOLOG(ndp, "[%d] NDP's kernel time too high... %ld (us)\n", k, 1000000 * (temp_end_ticks - cuda_memcpy_ticks) / ticks_per_second);
@@ -527,8 +769,6 @@ extern "C"
       SPDK_INFOLOG(ndp, "NDP's memcpy1 time: %ld (us), kernel function time:  %ld (us) answer memcpy %ld (us)\n", 1000 * 1000 * (cuda_memcpy_ticks - cuda_start_ticks) / ticks_per_second, 1000 * 1000 * (cuda_end_ticks - cuda_memcpy_ticks) / ticks_per_second, 1000 * 1000 * (cuda_host_ticks - cuda_end_ticks) / ticks_per_second);
     else
       SPDK_INFOLOG(ndp, "kernel function time:  %ld\n", 1000 * 1000 * (cuda_end_ticks - cuda_memcpy_ticks) / ticks_per_second);
-    // printf("total cosume time: %ld\n", (end_ticks - start_ticks)/ticks_per_ms);
-
     return 0;
   }
 };

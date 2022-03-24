@@ -53,9 +53,10 @@ struct ndp_request
     int task_type;
     bool dir_flag;//是在某目录夹操作还是对某个文件进行指定的操作。
     bool reverse;//是否递归查找
+    bool async_flag;//是否异步执行
     char read_path[256];//文件/目录路径？
     //uint64_t malloc_time, start_io_time, end_io_time, end_compute_time;
-    uint64_t start_time, end_time;
+    uint64_t start_time, end_time, total_io_time;
     int total_len;    
     bool accel, spdk_read_flag;
     int timeout_ms;
@@ -87,7 +88,8 @@ struct ndp_subrequest
     int total_bdev_blocks;  
     int total_len;
     
-    unsigned char *read_ptr;//读取的文件数据，
+    unsigned char *read_ptr;//读取的文件数据
+    unsigned char *result_ptr;//读取的文件数据
     uint64_t malloc_time, start_io_time, end_io_time, end_compute_time;  
     bool finished;
 };

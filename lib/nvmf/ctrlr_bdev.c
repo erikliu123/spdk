@@ -366,6 +366,7 @@ nvmf_bdev_zcopy_enabled(struct spdk_bdev *bdev)
 // };
 // struct file_dir_alloc g_dir_list;
 #if 1
+int tran_parse_ndp_task_json(const char *json_str, struct ndp_request *ndp_req);
 int tran_parse_ndp_task_json(const char *json_str, struct ndp_request *ndp_req)
 {
     struct json_object *jo_caps = NULL;
@@ -425,8 +426,40 @@ int tran_parse_ndp_task_json(const char *json_str, struct ndp_request *ndp_req)
             goto out;
         }
     }
+	
+	if (json_object_object_get_ex(jo_caps, "Compress", &jo)) {
+		struct json_object *jo2 = NULL;
+		ndp_req->accel = false;
+		ndp_req->task_type = COMPRESS;
+		if (json_object_get_type(jo) != json_type_object) {
+            goto out;
+        }
+		
+		if(json_object_object_get_ex(jo, "AccelerateFlag", &jo2)) {//为什么在这里退出?
+            //goto out;
+			;
+        }
+		ndp_req->accel = (json_object_get_int(jo2) == 1);
+	}
+
+	if (json_object_object_get_ex(jo_caps, "Decompress", &jo)) {
+		struct json_object *jo2 = NULL;
+		ndp_req->accel = false;
+		ndp_req->task_type = DECOMPRESS;
+		if (json_object_get_type(jo) != json_type_object) {
+            goto out;
+        }
+		
+		if(json_object_object_get_ex(jo, "AccelerateFlag", &jo2)) {//为什么在这里退出?
+            //goto out;
+			;
+        }
+		ndp_req->accel = (json_object_get_int(jo2) == 1);
+	}
+
 	if (json_object_object_get_ex(jo_caps, "FaceDetection", &jo)) {
 		struct json_object *jo2 = NULL;
+		ndp_req->task_type = FACE_DETECTION;
 		ndp_req->task.face_detection.cnn_flag = false;
 		ndp_req->task.face_detection.face_feature_flag = false;
 		if (json_object_get_type(jo) != json_type_object) {

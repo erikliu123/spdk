@@ -82,6 +82,7 @@ void ndp_face_detection_complete(struct spdk_bdev_io *bdev_io, bool success,
     {
         //读取人脸
         sub_req->end_io_time = spdk_get_ticks();
+        ndp_req->total_io_time += (sub_req->end_io_time - sub_req->start_io_time)/3500;
         ret = ndp_compute_face_detection(sub_req);
         spdk_ndp_request_complete(sub_req, ret);
     }
@@ -106,7 +107,7 @@ extern "C"
 };
 
 /*对接同步(read)和异步(SPDK)完成两种行为， 同步行为的话*/
-//非SPDK读取，那么针对错误情况无需结束请求，只要释放之前分配的内存空间即可；
+//非SPDK读取，那么针对错误情况无需结束请求，只要释放之前分配的内存空间即可
 int ndp_compute_face_detection(struct ndp_subrequest *sub_req)
 {
      struct ndp_request *ndp_req = sub_req->req;
@@ -223,7 +224,7 @@ int ndp_compute_face_detection(struct ndp_subrequest *sub_req)
     }
     sub_req->end_compute_time = spdk_get_ticks(); //计算结束时间
     //打印时间戳
-    SPDK_INFOLOG(ndp, "SPDK malloc time: %lu , SPDK IO consume: %lu, computation time: %lu\n", (sub_req->start_io_time - sub_req->malloc_time), (sub_req->end_io_time - sub_req->start_io_time), (sub_req->end_compute_time - sub_req->end_io_time));
+    SPDK_INFOLOG(ndp, "file[%s], exclude malloc, total time: %lu, SPDK malloc time: %lu , SPDK IO consume: %lu, computation time: %lu\n", sub_req->read_file, (sub_req->end_compute_time - sub_req->start_io_time)/3500,  (sub_req->start_io_time - sub_req->malloc_time)/3500, (sub_req->end_io_time - sub_req->start_io_time)/3500, (sub_req->end_compute_time - sub_req->end_io_time)/3500);
     
     if (!spdk_read_flag)//
     {

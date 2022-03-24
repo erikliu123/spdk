@@ -34,13 +34,20 @@ typedef struct
   // void decompress(Color32 colors[16]) const;
 } BlockDXT1;
 
+#define MAX_CUDA_PICTURES 10
 struct cudaPreAlloc
 {
   struct {
-    Color32 *decompressResult;
-    BlockDXT1 *inputImage;
+    Color32 *compressResult[MAX_CUDA_PICTURES];//1MB
+    BlockDXT1 *inputImage[MAX_CUDA_PICTURES];//8MB
+    //BlockDXT1 *inputImageArray;//8MB
     void *devHostDataToDevice;
   } compressTask;
+
+  struct {
+    Color32 *decompressResult[MAX_CUDA_PICTURES];//8MB
+    BlockDXT1 *inputImage[MAX_CUDA_PICTURES];//1MB
+  } decompressTask;
 
 };
 
