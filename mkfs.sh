@@ -3,6 +3,7 @@ DEV_MIRROR=/dev/nvme0n1 #SPDK use
 MOUNT_DIR=/mnt/ndp
 file_list="./lib/nvmf/data/*.pb ./lib/nvmf/data/*.dat /home/femu/pic/*.bmp"
 face_detecion_list="/home/femu/pic/test.bmp"
+dds_file="/home/femu/cuda-samples/Samples/dxtc/data/lena_ref.dds"
 dst_dir=$MOUNT_DIR
 
 function copy_files()
@@ -21,6 +22,7 @@ function copy_files()
             for i in $(seq 1 9)  
             do
                 sudo cp $face_detecion_list $dst_dir"/test_"$i".bmp"
+                sudo cp $dds_file $dst_dir"/test_"$i".dds"
             done
         fi
     else

@@ -1,11 +1,10 @@
 {
     "ID": 1,
-    "Type": 0,  
+    "Type": 1,  
     "UserSpaceIOFlag": false,
     "Async": false,
-    "FaceDetection":{
-        "AccelerateFlag": 1,
-        "FeatureFlag": 0
+    "Compress":{
+        "AccelerateFlag": 0
     },  
     "FileList":{
         "FileRegex": false,			
