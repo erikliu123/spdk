@@ -375,6 +375,7 @@ int tran_parse_ndp_task_json(const char *json_str, struct ndp_request *ndp_req)
     int ret = SPDK_NVME_SC_INVALID_FILE;
 	
 	ndp_req->dir_flag = false;
+	ndp_req->reverse = false;
 	
     if ((jo_caps = json_tokener_parse(json_str)) == NULL) {
         goto out;

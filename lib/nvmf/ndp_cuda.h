@@ -40,8 +40,10 @@ struct cudaPreAlloc
   struct {
     Color32 *compressResult[MAX_CUDA_PICTURES];//1MB
     BlockDXT1 *inputImage[MAX_CUDA_PICTURES];//8MB
+    void *d_permutations;
     //BlockDXT1 *inputImageArray;//8MB
     void *devHostDataToDevice;
+    uint *permutations;
   } compressTask;
 
   struct {

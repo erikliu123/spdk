@@ -67,6 +67,8 @@ uninstall: empty_rule
 empty_rule:
 	@:
 
+LDFLAGS += -DDLIB_USE_CUDA 
+
 $(APP) : $(OBJS) $(SPDK_LIB_FILES) $(ENV_LIBS) $(VFIO_USER_LIB_FILE)
 	echo $(APP) $(LDFLAGS) 
 	$(LINK_CXX)

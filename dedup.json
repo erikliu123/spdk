@@ -1,0 +1,11 @@
+{
+    "ID": 1,
+    "Type":3,  
+    "UserSpaceIOFlag": false,
+    "Async": false,
+    "Decompress":{
+        "AccelerateFlag": 0
+    }, 
+    "TimeOut": 200000
+}
+

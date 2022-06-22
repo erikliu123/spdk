@@ -14,5 +14,8 @@ all: $(APP)
 mmod: mmod.cpp
 	/usr/bin/c++ $(CFLAGS)  mmod.cpp -o $@ $(LDFLAGS)
 
+#$(CFLAGS)
 face_project: face_detection.cpp
-	nvcc -DDEBUG  -lpthread  -lX11 face_detection.cpp -o $@ `pkg-config opencv4 --cflags --libs`   -I ../dlib ../dlib/dlib/all/source.cpp
+	nvcc  -DDEBUG -g -lpthread  -lX11 face_detection.cpp -o $@ `pkg-config opencv4 --cflags --libs`  -ldlib
+	
+#-I ../dlib ../dlib/dlib/all/source.cpp

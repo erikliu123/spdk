@@ -1654,3 +1654,5 @@ spdk_nvmf_poll_group_dump_stat(struct spdk_nvmf_poll_group *group, struct spdk_j
 	spdk_json_write_array_end(w);
 	spdk_json_write_object_end(w);
 }
+
+SPDK_LOG_REGISTER_COMPONENT(ndp) //注册NDP的打印

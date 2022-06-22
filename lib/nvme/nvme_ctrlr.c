@@ -100,7 +100,6 @@ static void nvme_ctrlr_set_state(struct spdk_nvme_ctrlr *ctrlr, enum nvme_ctrlr_
 #define nvme_ctrlr_set_cc_async(ctrlr, value, cb_fn, cb_arg) \
 	nvme_ctrlr_set_reg_async(ctrlr, cc, 4, value, cb_fn, cb_arg)
 
-SPDK_LOG_REGISTER_COMPONENT(ndp); //注册NDP的打印
 
 static int
 nvme_ctrlr_get_cc(struct spdk_nvme_ctrlr *ctrlr, union spdk_nvme_cc_register *cc)

@@ -14,9 +14,10 @@
 #define MAX_COMPRESS_SIZE (MAX_GRAPH) //分大一点似乎好一点？
 
 enum NDP_TASK {
-    FACE_DETECTION=0, 
+    FACE_DETECTION = 0, 
     COMPRESS, 
     DECOMPRESS,
+    DEDUP,
     MAX_NDP_TASK
 };
 
